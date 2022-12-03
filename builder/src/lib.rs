@@ -80,12 +80,28 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     });
 
+    let build_fields_assignments = fields.iter().map(|field| {
+        let field_name = field.ident.as_ref().unwrap();
+        let ty = &field.ty;
+        if inner_type("Option", &ty).is_some() {
+            quote!(#field_name: self.#field_name.clone())
+        } else {
+            let error_msg = concat!(stringify!(field_name), "is not set");
+            quote!(#field_name : self.#field_name.clone().ok_or(#error_msg)?)
+        }
+    });
+
     let output = quote! {
         #vis struct #builder_name #generics {
             #(#builder_fields),*
         }
 
         impl #builder_name {
+            pub fn build(&mut self) -> std::result::Result<#struct_name, std::boxed::Box<dyn std::error::Error>> {
+                std::result::Result::Ok(#struct_name {
+                  #(#build_fields_assignments),*
+                })
+            }
             #(#setter_fns)*
         }
 
