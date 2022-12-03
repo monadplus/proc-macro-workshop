@@ -69,9 +69,24 @@ pub fn derive(input: TokenStream) -> TokenStream {
         quote!(#name : ::std::option::Option::None)
     });
 
+    let setter_fns = fields.iter().map(|field| {
+        let field_name = &field.ident;
+        let ty = inner_type("Option", &field.ty).unwrap_or_else(|| &field.ty);
+        quote! {
+            fn #field_name(&mut self, #field_name: #ty) -> &mut Self {
+                self.#field_name = ::std::option::Option::Some(#field_name);
+                self
+            }
+        }
+    });
+
     let output = quote! {
         #vis struct #builder_name #generics {
             #(#builder_fields),*
+        }
+
+        impl #builder_name {
+            #(#setter_fns)*
         }
 
         impl #struct_name {
