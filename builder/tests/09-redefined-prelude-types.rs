@@ -25,6 +25,11 @@ type Box = ();
 #[derive(Builder)]
 pub struct Command {
     executable: String,
+    #[builder(each = "arg")]
+    args: Vec<String>,
+    #[builder(each = "env")]
+    env: Vec<String>,
+    current_dir: std::option::Option<String>,
 }
 
 fn main() {}
