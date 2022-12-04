@@ -90,11 +90,13 @@ fn get_attr_value(attr: &syn::Attribute) -> Option<String> {
     }
 }
 
+// error: expected `builder(each = "...")`
+//   --> tests/08-unrecognized-attribute.rs:22:7
+//    |
+// 22 |     #[builder(eac = "arg")]
+//    |       ^^^^^^^^^^^^^^^^^^^^
 fn mk_attr_error<T: ToTokens>(tokens: T) -> Option<proc_macro2::TokenStream> {
-    Some(
-        syn::Error::new_spanned(tokens, r##"expecting #[builder(each = "...")]"##)
-            .to_compile_error(),
-    )
+    Some(syn::Error::new_spanned(tokens, r#"expected `builder(each = "...")`"#).to_compile_error())
 }
 
 #[proc_macro_derive(Builder, attributes(builder))]
@@ -178,7 +180,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 match &meta_list.nested[0] {
                     syn::NestedMeta::Meta(syn::Meta::NameValue(name_value)) => {
                         if !name_value.path.is_ident("each") {
-                            return mk_attr_error(&name_value.path);
+                            return mk_attr_error(&meta_list);
                         }
 
                         match &name_value.lit {
