@@ -1,0 +1,21 @@
+[package]
+name = "derive_prompt"
+version = "0.0.0"
+autotests = false
+edition = "2021"
+publish = false
+
+[[test]]
+name = "tests"
+path = "tests/progress.rs"
+
+[dev-dependencies]
+trybuild = { version = "1.0.49", features = ["diff"] }
+
+[dependencies]
+derive_prompt_impl = {path = "impl"}
+
+colored = "2.0.0"
+displaydoc = "0.2.3"
+inquire = { version = "0.5.3", features = ["chrono"] }
+thiserror = "1.0.38"
