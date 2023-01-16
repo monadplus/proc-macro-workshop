@@ -18,6 +18,18 @@ pub struct Command {
     wrapper: Wrapper,
 }
 
+#[derive(Debug, FromPrompt)]
+pub struct A1(u8);
+
+#[derive(Debug, FromPrompt)]
+pub struct B1(u8, u8);
+
+#[derive(Debug, FromPrompt)]
+pub enum Choice {
+    A(A1),
+    B(B1),
+}
+
 // Write code here.
 //
 // To see what the code looks like after macro expansion:
@@ -26,6 +38,6 @@ pub struct Command {
 // To run the code:
 //     $ cargo run
 fn main() {
-    let command = interactive::<Command>().unwrap();
+    let command = interactive::<Choice>().unwrap();
     println!("{command:?}")
 }
