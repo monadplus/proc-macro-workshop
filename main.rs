@@ -1,7 +1,10 @@
 use derive_prompt::*;
 
-#[derive(Debug)]
-struct Wrapper(u8);
+#[derive(Debug, FromPrompt)]
+struct Newtype(bool);
+
+#[derive(Debug, FromPrompt)]
+struct Wrapper(u8, String);
 
 #[derive(Debug, FromPrompt)]
 #[allow(dead_code)]
@@ -11,6 +14,7 @@ pub struct Command {
     precision: f64,
     shouting: bool,
     ids: Vec<u8>,
+    newtype: Newtype,
     wrapper: Wrapper,
 }
 

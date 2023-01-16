@@ -24,7 +24,7 @@ macro_rules! primitive_type {
                             <$ty>::MAX
                         )
                     } else {
-                        concat!("Expecting a {}", $name).to_string()
+                        concat!("Expecting a ", $name).to_string()
                     }
                 });
                 CustomType::<$ty>::new(&name)

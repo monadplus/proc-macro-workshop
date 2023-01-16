@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, DeriveInput, Fields, FieldsNamed, Ident, spanned::Spanned};
+use syn::{parse_macro_input, DeriveInput, Fields, FieldsNamed, Ident, spanned::Spanned, FieldsUnnamed};
 
 // TODO:
 // - [ ] Newtype (single unnamed field) should default to underlying type
@@ -31,14 +31,13 @@ fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
     match fields {
         Fields::Named(FieldsNamed { named, .. }) => {
             let fields_stmts = named.iter().map(|field| {
-                let field_name = &field.ident.as_ref().unwrap();
+                let field_name = &field.ident.as_ref().unwrap() /* Named field*/;
                 let field_name_str = format!("{}.{}", name, field_name);
                 let ty = &field.ty;
                 quote_spanned!(ty.span() => let #field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;)
             });
             let fields_name = named.iter().map(|field| &field.ident);
             let new_instance_msg = format!("New instance of {}", name);
-
             let tokens = quote! {
                 impl derive_prompt::Prompt for #name {
                     fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
@@ -55,10 +54,24 @@ fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
             // eprintln!("{}", tokens);
             tokens
         }
-        // Fields::Unnamed(_) => {
-        //
-        // }
-        _ => syn::Error::new_spanned(name, "`FromPrompt` is not supported for unit types")
-            .to_compile_error(),
+        Fields::Unnamed(FieldsUnnamed { unnamed, ..}) => {
+            let tuple_fields = unnamed.iter().enumerate().map(|(i, field)| {
+                let ty = &field.ty;
+                let field_name = format!("{}.{}", name, i);
+                quote_spanned!(ty.span() => <#ty as derive_prompt::Prompt>::prompt(#field_name.to_string(), None)?)
+            });
+            let new_instance_msg = format!("New instance of {}", name);
+            let tokens = quote! {
+                impl derive_prompt::Prompt for #name {
+                    fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
+                        println!(#new_instance_msg);
+                        Ok(#name(#(#tuple_fields),*))
+                    }
+                }
+            };
+            // eprintln!("{}", tokens);
+            tokens
+        }
+        _ => syn::Error::new_spanned(name, "`FromPrompt` is not supported for unit types") .to_compile_error(),
     }
 }
