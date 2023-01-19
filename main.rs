@@ -25,9 +25,12 @@ pub struct A1(u8);
 pub struct B1(u8, u8);
 
 #[derive(Debug, FromPrompt)]
+pub struct C1(u8, u8, String);
+
+#[derive(Debug, FromPrompt)]
 pub enum Choice {
     A(A1),
-    B(B1),
+    B(B1, C1),
 }
 
 // Write code here.

@@ -2,7 +2,7 @@ use colored::Colorize;
 use inquire::{length, Confirm, CustomType, Text};
 
 pub use derive_prompt_impl::*;
-pub use inquire::{Select, error::InquireResult};
+pub use inquire::{error::InquireResult, Select};
 
 pub fn interactive<T: Prompt>() -> InquireResult<T> {
     <T as Prompt>::prompt("".to_string(), None)

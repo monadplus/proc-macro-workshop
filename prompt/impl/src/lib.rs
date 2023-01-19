@@ -1,10 +1,12 @@
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, DeriveInput, Fields, FieldsNamed, Ident, spanned::Spanned, FieldsUnnamed, punctuated::Punctuated, Variant};
+use syn::{
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, DeriveInput, Fields, FieldsNamed,
+    FieldsUnnamed, Ident, Variant,
+};
 
 // TODO:
 // - [ ] attribute to rely on the FromString+ToString instance
-
 #[proc_macro_derive(FromPrompt, attributes(newtype))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
@@ -21,75 +23,63 @@ pub fn derive(input: TokenStream) -> TokenStream {
         _ => syn::Error::new_spanned(name, "`FromPrompt` cannot be derived for unions.")
             .to_compile_error(),
     };
+    // eprintln!("{}", output);
 
     proc_macro::TokenStream::from(output)
 }
 
 fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
     match fields {
-        Fields::Named(FieldsNamed { named, .. }) => {
-            let fields_stmts = named.iter().map(|field| {
-                let field_name = &field.ident.as_ref().unwrap() /* Named field*/;
-                let field_name_str = format!("{}.{}", name, field_name);
-                let ty = &field.ty;
-                quote_spanned!(ty.span() => let #field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;)
-            });
-            let fields_name = named.iter().map(|field| &field.ident);
+        Fields::Named(fields) => {
+            let constr = quote!(#name);
+            let NamedInstance { let_fields_decl, struct_decl } = named_instance(constr, fields);
             let new_instance_msg = format!("New instance of {}", name);
-            let tokens = quote! {
+            quote! {
                 impl derive_prompt::Prompt for #name {
                     fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
                         println!(#new_instance_msg);
-
-                        #(#fields_stmts)*
-
-                        Ok(#name {
-                          #(#fields_name),*
-                        })
+                        #(#let_fields_decl)*
+                        Ok(#struct_decl)
                     }
                 }
-            };
-            // eprintln!("{}", tokens);
-            tokens
+            }
         }
-        Fields::Unnamed(FieldsUnnamed { unnamed, ..}) => {
-            let tuple_fields = unnamed.iter().enumerate().map(|(i, field)| {
-                let ty = &field.ty;
-                let field_name = format!("{}.{}", name, i);
-                quote_spanned!(ty.span() => <#ty as derive_prompt::Prompt>::prompt(#field_name.to_string(), None)?)
-            });
+        Fields::Unnamed(fields) => {
+            let constr = quote!(#name);
+            let unnamed_instance = unnamed_instance(constr, fields);
             let new_instance_msg = format!("New instance of {}", name);
-            let tokens = quote! {
+            quote! {
                 impl derive_prompt::Prompt for #name {
                     fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
                         println!(#new_instance_msg);
-                        Ok(#name(#(#tuple_fields),*))
+                        Ok(#unnamed_instance)
                     }
                 }
-            };
-            // eprintln!("{}", tokens);
-            tokens
+            }
         }
-        _ => syn::Error::new_spanned(name, "`FromPrompt` is not supported for unit types") .to_compile_error(),
+        _ => syn::Error::new_spanned(name, "`FromPrompt` is not supported for unit types")
+            .to_compile_error(),
     }
 }
 
-// TODO: 
-// - [ ] newtype enum
+// TODO:
 // - [ ] named enums
-// - [ ] unnamed enums
 fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_macro2::TokenStream {
     if variants.is_empty() {
-        return syn::Error::new_spanned(name, "`FromPrompt` is not supported for empty Enum") .to_compile_error();
+        return syn::Error::new_spanned(name, "`FromPrompt` is not supported for empty Enum")
+            .to_compile_error();
     }
 
-    let options = variants.iter().map(|variant| {
-        format!("{}", variant.ident)
-    });
+    let options = variants
+        .iter()
+        .map(|variant| variant.ident.to_string())
+        .collect::<Vec<_>>();
 
-    let cases = variants.iter().map(|variant| build_enum_case(name.clone(), &variant));
+    let cases = variants
+        .into_iter()
+        .map(|variant| enum_case(name.clone(), variant));
 
-    let tokens = quote! {
+    quote! {
         impl derive_prompt::Prompt for #name {
             fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
                 let options = vec!(#(#options),*);
@@ -98,52 +88,77 @@ fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_mac
                 panic!("The user selected an enum variant that is not valid")
             }
         }
-    };
-    eprintln!("{}", tokens);
-    tokens
-}
-
-fn build_enum_case(enum_ident: Ident, variant: &Variant) -> proc_macro2::TokenStream {
-    match &variant.fields {
-        Fields::Unnamed(FieldsUnnamed { unnamed,.. }) if unnamed.len() == 1 => {
-            let variant_ident = &variant.ident;
-            let variant_ident_str: String = format!("{}", &variant.ident);
-            let prompt_str: String = format!("{}::{}", &enum_ident, &variant.ident);
-            let field_type = &unnamed[0].ty;
-            quote! {
-                if (__selected_variant == #variant_ident_str) {
-                    let field_instance = <#field_type as derive_prompt::Prompt>::prompt(#prompt_str.to_string(), None)?;
-                    return Ok(#enum_ident::#variant_ident(field_instance))
-                }
-            }
-        }
-        Fields::Unnamed(_) => todo!(),
-        Fields::Named(_) => todo!(),
-        Fields::Unit => todo!(),
     }
 }
 
+fn enum_case(enum_ident: Ident, variant: Variant) -> proc_macro2::TokenStream {
+    let variant_ident = variant.ident;
+    match variant.fields {
+        Fields::Unnamed(fields) => {
+            let constr = quote!(#enum_ident::#variant_ident);
+            let unnamed_instance = unnamed_instance(constr, fields);
+            let variant_ident_str = variant_ident.to_string();
+            quote! {
+                if (__selected_variant == #variant_ident_str) {
+                    return Ok(#unnamed_instance)
+                }
+            }
+        }
+        Fields::Named(fields) => {
+            quote!()
+        }
+        Fields::Unit => {
+            syn::Error::new_spanned(enum_ident, "`FromPrompt` is not supported for empty enums")
+                .to_compile_error()
+        }
+    }
+}
 
+struct NamedInstance {
+    let_fields_decl: Vec<proc_macro2::TokenStream>,
+    struct_decl: proc_macro2::TokenStream,
+}
 
+/// - `constr`: usually an ident inside a quote e.g. quote!(#constr_name)
+///             or an enum constr e.g. quote!(#enum_ident::#enum_variant)
+fn named_instance(
+    constr: proc_macro2::TokenStream,
+    fields: FieldsNamed,
+) -> NamedInstance {
+    let FieldsNamed { named, .. } = fields;
 
+    let let_fields_name = named.iter().map(|field| field.ident.clone()).collect::<Vec<_>>();
+    let struct_decl = quote!(#constr { #(#let_fields_name),* });
 
+    let let_fields_decl = named.into_iter().map(|field| {
+        let let_field_name = &field.ident.as_ref().unwrap() /* Named field is always Some*/;
+        let ty = &field.ty;
+        let field_name_str = format!("{}", constr);
+        quote_spanned!{ty.span() => 
+            let #let_field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;
+        }
+    }).collect::<Vec<_>>();
 
+    NamedInstance { let_fields_decl, struct_decl }
+}
 
+/// - `constr`: usually an ident inside a quote e.g. quote!(#constr_name)
+///             or an enum constr e.g. quote!(#enum_ident::#enum_variant)
+fn unnamed_instance(
+    constr: proc_macro2::TokenStream,
+    fields: FieldsUnnamed,
+) -> proc_macro2::TokenStream {
+    let FieldsUnnamed { unnamed, .. } = fields;
 
+    let tuple_fields = unnamed.iter().enumerate().map(|(i, field)| {
+        let ty = &field.ty;
+        let field_name_str = format!("{}.{}", constr, i);
+        quote_spanned! {ty.span() =>
+            <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?
+        }
+    });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    quote! {
+        #constr(#(#tuple_fields),*)
+    }
+}
