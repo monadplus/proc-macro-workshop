@@ -5,4 +5,5 @@ fn tests() {
     t.pass("tests/02-unnamed-structs.rs");
     t.pass("tests/03-enums-newtype.rs");
     t.pass("tests/04-enums-unnamed.rs");
+    t.pass("tests/05-enums-named.rs");
 }

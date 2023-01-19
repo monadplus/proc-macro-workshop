@@ -32,7 +32,10 @@ fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
     match fields {
         Fields::Named(fields) => {
             let constr = quote!(#name);
-            let NamedInstance { let_fields_decl, struct_decl } = named_instance(constr, fields);
+            let NamedInstance {
+                let_fields_decl,
+                struct_decl,
+            } = named_instance(constr, fields);
             let new_instance_msg = format!("New instance of {}", name);
             quote! {
                 impl derive_prompt::Prompt for #name {
@@ -62,8 +65,6 @@ fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
     }
 }
 
-// TODO:
-// - [ ] named enums
 fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_macro2::TokenStream {
     if variants.is_empty() {
         return syn::Error::new_spanned(name, "`FromPrompt` is not supported for empty Enum")
@@ -77,11 +78,14 @@ fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_mac
 
     let cases = variants
         .into_iter()
-        .map(|variant| enum_case(name.clone(), variant));
+        .map(|variant| enum_case_decl(name.clone(), variant));
+
+    let new_instance_msg = format!("New instance of {}", name);
 
     quote! {
         impl derive_prompt::Prompt for #name {
             fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
+                println!(#new_instance_msg);
                 let options = vec!(#(#options),*);
                 let __selected_variant = derive_prompt::Select::new("Select the variant:", options).prompt()?;
                 #(#cases)*
@@ -91,25 +95,41 @@ fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_mac
     }
 }
 
-fn enum_case(enum_ident: Ident, variant: Variant) -> proc_macro2::TokenStream {
+fn enum_case_decl(enum_ident: Ident, variant: Variant) -> proc_macro2::TokenStream {
     let variant_ident = variant.ident;
-    match variant.fields {
+
+    let enum_instance_stmt = match variant.fields {
         Fields::Unnamed(fields) => {
             let constr = quote!(#enum_ident::#variant_ident);
             let unnamed_instance = unnamed_instance(constr, fields);
-            let variant_ident_str = variant_ident.to_string();
             quote! {
-                if (__selected_variant == #variant_ident_str) {
-                    return Ok(#unnamed_instance)
-                }
+                return Ok(#unnamed_instance)
             }
         }
         Fields::Named(fields) => {
-            quote!()
+            let constr = quote!(#enum_ident::#variant_ident);
+            let NamedInstance {
+                let_fields_decl,
+                struct_decl,
+            } = named_instance(constr, fields);
+            quote! {
+                #(#let_fields_decl)*
+                return Ok(#struct_decl)
+            }
         }
         Fields::Unit => {
-            syn::Error::new_spanned(enum_ident, "`FromPrompt` is not supported for empty enums")
-                .to_compile_error()
+            return syn::Error::new_spanned(
+                enum_ident,
+                "`FromPrompt` is not supported for empty enums",
+            )
+            .to_compile_error()
+        }
+    };
+
+    let variant_ident_str = variant_ident.to_string();
+    quote! {
+        if (__selected_variant == #variant_ident_str) {
+            #enum_instance_stmt
         }
     }
 }
@@ -121,25 +141,28 @@ struct NamedInstance {
 
 /// - `constr`: usually an ident inside a quote e.g. quote!(#constr_name)
 ///             or an enum constr e.g. quote!(#enum_ident::#enum_variant)
-fn named_instance(
-    constr: proc_macro2::TokenStream,
-    fields: FieldsNamed,
-) -> NamedInstance {
+fn named_instance(constr: proc_macro2::TokenStream, fields: FieldsNamed) -> NamedInstance {
     let FieldsNamed { named, .. } = fields;
 
-    let let_fields_name = named.iter().map(|field| field.ident.clone()).collect::<Vec<_>>();
+    let let_fields_name = named
+        .iter()
+        .map(|field| field.ident.clone())
+        .collect::<Vec<_>>();
     let struct_decl = quote!(#constr { #(#let_fields_name),* });
 
     let let_fields_decl = named.into_iter().map(|field| {
-        let let_field_name = &field.ident.as_ref().unwrap() /* Named field is always Some*/;
+        let field_name = &field.ident.as_ref().unwrap() /* Named field is always Some*/;
         let ty = &field.ty;
-        let field_name_str = format!("{}", constr);
-        quote_spanned!{ty.span() => 
-            let #let_field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;
+        let field_name_str = format!("<{}>.{}", constr, field_name);
+        quote_spanned!{ty.span() =>
+            let #field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;
         }
     }).collect::<Vec<_>>();
 
-    NamedInstance { let_fields_decl, struct_decl }
+    NamedInstance {
+        let_fields_decl,
+        struct_decl,
+    }
 }
 
 /// - `constr`: usually an ident inside a quote e.g. quote!(#constr_name)
