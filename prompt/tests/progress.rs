@@ -10,4 +10,5 @@ fn tests() {
     t.pass("tests/07-enum-unit.rs");
     t.compile_fail("tests/08-enum-empty.rs");
     t.compile_fail("tests/09-trait-not-sat.rs");
+    t.pass("tests/10-from-str.rs");
 }

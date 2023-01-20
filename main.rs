@@ -1,37 +1,33 @@
+use std::str::FromStr;
+
 use derive_prompt::*;
 
-#[derive(Debug, FromPrompt)]
-struct Newtype(bool);
-
-#[derive(Debug, FromPrompt)]
-struct Wrapper(u8, String);
-
-#[derive(Debug, FromPrompt)]
-#[allow(dead_code)]
-pub struct Command {
-    executable: String,
-    iterations: u64,
-    precision: f64,
-    shouting: bool,
-    ids: Vec<u8>,
-    newtype: Newtype,
-    wrapper: Wrapper,
-}
-
-#[derive(Debug, FromPrompt)]
-pub struct A1(u8);
-
-#[derive(Debug, FromPrompt)]
-pub struct B1(u8, u8);
-
-#[derive(Debug, FromPrompt)]
-pub struct B2(String);
-
-#[derive(Debug, FromPrompt)]
-pub enum Choice {
+#[derive(Debug, Clone, FromPrompt)]
+#[from_str]
+enum B {
     A,
     B,
-    C,
+}
+
+impl FromStr for B {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "A" => Ok(B::A),
+            "B" => Ok(B::B),
+            _ => Err("A or B".to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for B {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            B::A => write!(f, "B::A"),
+            B::B => write!(f, "B::B"),
+        }
+    }
 }
 
 // Write code here.
@@ -42,6 +38,6 @@ pub enum Choice {
 // To run the code:
 //     $ cargo run
 fn main() {
-    let command = interactive::<Choice>().unwrap();
+    let command = interactive::<B>().unwrap();
     println!("{command:?}")
 }

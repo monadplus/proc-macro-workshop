@@ -1,74 +1,84 @@
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned, DeriveInput, Fields, FieldsNamed,
-    FieldsUnnamed, Ident, Variant,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, DeriveInput, Fields,
+    FieldsNamed, FieldsUnnamed, Ident, Variant,
 };
 
 // TODO:
-// - [ ] Attribute to use `FromString+ToString` instance
 // - [ ] Attribute for help
+// - [ ] Are decimals correctly formatted?
 // - [ ] Clean code
-#[proc_macro_derive(FromPrompt, attributes(newtype))]
+#[proc_macro_derive(FromPrompt, attributes(from_str))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
-        attrs: _,
+        attrs,
         vis: _,
         ident: name,
         generics: _,
         data,
     } = parse_macro_input!(input as DeriveInput);
 
-    let output = match data {
-        syn::Data::Struct(s) => derive_struct(name, s.fields),
-        syn::Data::Enum(e) => derive_enum(name, e.variants),
-        _ => syn::Error::new_spanned(name, "`FromPrompt` cannot be derived for unions.")
-            .to_compile_error(),
+    let output = match get_attr(&attrs[..], "from_str") {
+        Some(attr) => derive_from_str(name, attr),
+        None => match data {
+            syn::Data::Struct(s) => derive_struct(name, s.fields),
+            syn::Data::Enum(e) => derive_enum(name, e.variants),
+            _ => syn::Error::new_spanned(name, "`FromPrompt` cannot be derived for unions.")
+                .to_compile_error(),
+        },
     };
-    // eprintln!("{}", output);
 
     proc_macro::TokenStream::from(output)
 }
 
+fn derive_from_str(name: Ident, _attr: &Attribute) -> proc_macro2::TokenStream {
+    let new_instance_msg = format!("New instance of {}", name);
+    let field_name_str = format!("{}:", name);
+    let help_msg_str = format!("Expecting a FromStr instance");
+    let placeholder_str = format!("<STRING>");
+    quote! {
+        impl derive_prompt::Prompt for #name {
+            fn prompt(_name: String, help: Option<String>) -> derive_prompt::InquireResult<Self> {
+                println!(#new_instance_msg);
+                let help = help.unwrap_or_else(|| #help_msg_str.to_string());
+                Ok(derive_prompt::CustomType::<#name>::new(#field_name_str)
+                    .with_help_message(&help)
+                    .with_placeholder(#placeholder_str)
+                    .prompt()?)
+            }
+        }
+    }
+}
+
 fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
-    match fields {
+    let constr = quote!(#name);
+    let trait_body = match fields {
         Fields::Named(fields) => {
-            let constr = quote!(#name);
             let NamedInstance {
                 let_fields_decl,
                 struct_decl,
             } = named_instance(constr, fields);
-            let new_instance_msg = format!("New instance of {}", name);
             quote! {
-                impl derive_prompt::Prompt for #name {
-                    fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
-                        println!(#new_instance_msg);
-                        #(#let_fields_decl)*
-                        Ok(#struct_decl)
-                    }
-                }
+                #(#let_fields_decl)*
+                Ok(#struct_decl)
             }
         }
         Fields::Unnamed(fields) => {
-            let constr = quote!(#name);
             let unnamed_instance = unnamed_instance(constr, fields);
-            let new_instance_msg = format!("New instance of {}", name);
-            quote! {
-                impl derive_prompt::Prompt for #name {
-                    fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
-                        println!(#new_instance_msg);
-                        Ok(#unnamed_instance)
-                    }
-                }
-            }
+            quote!(Ok(#unnamed_instance))
         }
         Fields::Unit => {
-            quote! {
-                impl derive_prompt::Prompt for #name {
-                    fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
-                        Ok(#name)
-                    }
-                }
+            quote!(Ok(#name))
+        }
+    };
+
+    let new_instance_msg = format!("New instance of {}", name);
+    quote! {
+        impl derive_prompt::Prompt for #name {
+            fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
+                println!(#new_instance_msg);
+                #trait_body
             }
         }
     }
@@ -190,4 +200,14 @@ fn unnamed_instance(
     quote! {
         #constr(#(#tuple_fields),*)
     }
+}
+
+fn get_attr<'a, 'b>(attrs: &'a [Attribute], attr_name: &'b str) -> Option<&'a syn::Attribute> {
+    if attrs.len() == 1 {
+        let attr = &attrs[0];
+        if attr.path.segments.len() == 1 && attr.path.segments[0].ident == attr_name {
+            return Some(attr);
+        }
+    }
+    None
 }
