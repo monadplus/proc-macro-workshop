@@ -29,9 +29,9 @@ pub struct B2(String);
 
 #[derive(Debug, FromPrompt)]
 pub enum Choice {
-    A(A1),
-    B(B1, B2),
-    C { c1: u8, c2: i16 },
+    A,
+    B,
+    C,
 }
 
 // Write code here.

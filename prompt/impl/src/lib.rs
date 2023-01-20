@@ -6,7 +6,9 @@ use syn::{
 };
 
 // TODO:
-// - [ ] attribute to rely on the FromString+ToString instance
+// - [ ] Attribute to use `FromString+ToString` instance
+// - [ ] Attribute for help
+// - [ ] Clean code
 #[proc_macro_derive(FromPrompt, attributes(newtype))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
@@ -60,14 +62,21 @@ fn derive_struct(name: Ident, fields: Fields) -> proc_macro2::TokenStream {
                 }
             }
         }
-        _ => syn::Error::new_spanned(name, "`FromPrompt` is not supported for unit types")
-            .to_compile_error(),
+        Fields::Unit => {
+            quote! {
+                impl derive_prompt::Prompt for #name {
+                    fn prompt(_name: String, _help: Option<String>) -> derive_prompt::InquireResult<Self> {
+                        Ok(#name)
+                    }
+                }
+            }
+        }
     }
 }
 
 fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_macro2::TokenStream {
     if variants.is_empty() {
-        return syn::Error::new_spanned(name, "`FromPrompt` is not supported for empty Enum")
+        return syn::Error::new_spanned(name, "`FromPrompt` is not supported for empty enums.")
             .to_compile_error();
     }
 
@@ -97,17 +106,16 @@ fn derive_enum<Sep>(name: Ident, variants: Punctuated<Variant, Sep>) -> proc_mac
 
 fn enum_case_decl(enum_ident: Ident, variant: Variant) -> proc_macro2::TokenStream {
     let variant_ident = variant.ident;
+    let constr = quote!(#enum_ident::#variant_ident);
 
     let enum_instance_stmt = match variant.fields {
         Fields::Unnamed(fields) => {
-            let constr = quote!(#enum_ident::#variant_ident);
             let unnamed_instance = unnamed_instance(constr, fields);
             quote! {
                 return Ok(#unnamed_instance)
             }
         }
         Fields::Named(fields) => {
-            let constr = quote!(#enum_ident::#variant_ident);
             let NamedInstance {
                 let_fields_decl,
                 struct_decl,
@@ -118,11 +126,9 @@ fn enum_case_decl(enum_ident: Ident, variant: Variant) -> proc_macro2::TokenStre
             }
         }
         Fields::Unit => {
-            return syn::Error::new_spanned(
-                enum_ident,
-                "`FromPrompt` is not supported for empty enums",
-            )
-            .to_compile_error()
+            quote! {
+                return Ok(#constr)
+            }
         }
     };
 

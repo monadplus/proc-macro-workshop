@@ -1,0 +1,5 @@
+error: `FromPrompt` is not supported for empty enums.
+ --> tests/08-enum-empty.rs:4:10
+  |
+4 | pub enum Choice {}
+  |          ^^^^^^
