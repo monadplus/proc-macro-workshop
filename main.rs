@@ -1,34 +1,12 @@
-use std::str::FromStr;
-
 use derive_prompt::*;
 
 #[derive(Debug, Clone, FromPrompt)]
-#[from_str]
-enum B {
-    A,
-    B,
+enum A {
+    A {#[help(msg = "Write a u8")] a1: u8, a2: f32, a3:f64 },
+    B(u8),
+    C
 }
 
-impl FromStr for B {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "A" => Ok(B::A),
-            "B" => Ok(B::B),
-            _ => Err("A or B".to_string()),
-        }
-    }
-}
-
-impl std::fmt::Display for B {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            B::A => write!(f, "B::A"),
-            B::B => write!(f, "B::B"),
-        }
-    }
-}
 
 // Write code here.
 //
@@ -37,7 +15,7 @@ impl std::fmt::Display for B {
 //
 // To run the code:
 //     $ cargo run
-fn main() {
-    let command = interactive::<B>().unwrap();
+fn main() { 
+    let command = interactive::<A>().unwrap();
     println!("{command:?}")
 }

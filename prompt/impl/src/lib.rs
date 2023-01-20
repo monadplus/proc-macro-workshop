@@ -1,15 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, DeriveInput, Fields,
-    FieldsNamed, FieldsUnnamed, Ident, Variant,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, DeriveInput, Field,
+    Fields, FieldsNamed, FieldsUnnamed, Ident, Variant,
 };
 
-// TODO:
-// - [ ] Attribute for help
-// - [ ] Are decimals correctly formatted?
-// - [ ] Clean code
-#[proc_macro_derive(FromPrompt, attributes(from_str))]
+#[proc_macro_derive(FromPrompt, attributes(from_str, help))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
         attrs,
@@ -170,8 +166,9 @@ fn named_instance(constr: proc_macro2::TokenStream, fields: FieldsNamed) -> Name
         let field_name = &field.ident.as_ref().unwrap() /* Named field is always Some*/;
         let ty = &field.ty;
         let field_name_str = format!("<{}>.{}", constr, field_name);
+        let help_msg = get_help_message(&field);
         quote_spanned!{ty.span() =>
-            let #field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?;
+            let #field_name = <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), #help_msg)?;
         }
     }).collect::<Vec<_>>();
 
@@ -192,8 +189,9 @@ fn unnamed_instance(
     let tuple_fields = unnamed.iter().enumerate().map(|(i, field)| {
         let ty = &field.ty;
         let field_name_str = format!("{}.{}", constr, i);
+        let help_msg = get_help_message(&field);
         quote_spanned! {ty.span() =>
-            <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), None)?
+            <#ty as derive_prompt::Prompt>::prompt(#field_name_str.to_string(), #help_msg)?
         }
     });
 
@@ -210,4 +208,37 @@ fn get_attr<'a, 'b>(attrs: &'a [Attribute], attr_name: &'b str) -> Option<&'a sy
         }
     }
     None
+}
+
+fn get_attr_value(attr: &Attribute) -> Option<String> {
+    match attr.parse_meta() {
+        Ok(syn::Meta::List(meta_list)) => {
+            if meta_list.nested.len() != 1 {
+                return None;
+            }
+            match &meta_list.nested[0] {
+                syn::NestedMeta::Meta(syn::Meta::NameValue(name_value)) => {
+                    if !name_value.path.is_ident("msg") {
+                        return None;
+                    }
+
+                    match &name_value.lit {
+                        syn::Lit::Str(lit_str) => Some(lit_str.value()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn get_help_message(field: &Field) -> proc_macro2::TokenStream {
+    let res = get_attr(&field.attrs, "help").and_then(|attr| get_attr_value(&attr));
+    // TODO: hacky; how to pass a Option<String> to quote! ?
+    match res {
+        Some(msg) => quote!(Some(#msg.to_string())),
+        None => quote!(None),
+    }
 }
