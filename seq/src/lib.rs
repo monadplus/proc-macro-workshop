@@ -43,6 +43,10 @@ impl Parse for Sequence {
 
 impl Sequence {
     fn expand(&mut self) -> TokenStream {
+        let (tokens, found) = self.replace_repetition_section(self.body.clone());
+        if found {
+            return tokens;
+        }
         (self.start..self.end).fold(TokenStream::new(), |mut ts, i| {
             let ts_aux = self.replace_number(self.body.clone(), i);
             ts.extend(ts_aux);
@@ -50,6 +54,59 @@ impl Sequence {
         })
     }
 
+    /// #[derive(Copy, Clone, PartialEq, Debug)]
+    /// enum Interrupt {
+    ///   #(Irq~N,)*
+    /// }
+    fn replace_repetition_section(&self, body: TokenStream) -> (TokenStream, bool) {
+        let mut output_stream = TokenStream::new();
+        let mut repetition_found = false;
+        let mut token_iter = body.into_iter();
+        while let Some(token) = token_iter.next() {
+            let output_token: TokenTree = match token {
+                // A possible repeated section '#'
+                TokenTree::Punct(ref punct) if punct.as_char() == '#' => {
+                    match look_ahead2(&token_iter) {
+                        (Some(TokenTree::Group(group)), Some(TokenTree::Punct(punct)))
+                            if group.delimiter() == proc_macro2::Delimiter::Parenthesis
+                                && punct.as_char() == '*' =>
+                        {
+                            token_iter.next(); // (...)
+                            token_iter.next(); // '*'
+                            repetition_found = true;
+                            let stream =
+                                (self.start..self.end).fold(TokenStream::new(), |mut ts, i| {
+                                    let ts_aux = self.replace_number(group.stream().clone(), i);
+                                    ts.extend(ts_aux);
+                                    ts
+                                });
+                            let mut group =
+                                proc_macro2::Group::new(proc_macro2::Delimiter::None, stream);
+                            group.set_span(token.span());
+                            TokenTree::from(group)
+                        }
+                        _ => token,
+                    }
+                }
+                // Expand content of (), {}, []
+                TokenTree::Group(ref group) => {
+                    let del = group.delimiter();
+                    let (stream, found) = self.replace_repetition_section(group.stream());
+                    repetition_found |= found;
+                    let mut group = proc_macro2::Group::new(del, stream);
+                    group.set_span(token.span());
+                    TokenTree::from(group)
+                }
+                _ => token,
+            };
+            output_stream.extend(TokenStream::from(output_token));
+        }
+        (output_stream, repetition_found)
+    }
+
+    /// fn f~N () -> u64 {
+    ///     N * 2
+    /// }
     fn replace_number(&self, body: TokenStream, val: u64) -> TokenStream {
         let mut output_stream = TokenStream::new();
         let mut token_iter = body.into_iter();
@@ -64,8 +121,7 @@ impl Sequence {
                 }
                 // <prefix>~N
                 TokenTree::Ident(ref prefix) => {
-                    let mut peek = token_iter.clone();
-                    match (peek.next(), peek.next()) {
+                    match look_ahead2(&token_iter) {
                         (Some(TokenTree::Punct(punct)), Some(TokenTree::Ident(ref ident)))
                             if punct.as_char() == '~' && ident == &self.var_name =>
                         {
@@ -93,4 +149,11 @@ impl Sequence {
 
         output_stream
     }
+}
+
+fn look_ahead2(
+    token_iter: &proc_macro2::token_stream::IntoIter,
+) -> (Option<TokenTree>, Option<TokenTree>) {
+    let mut peek = token_iter.clone();
+    (peek.next(), peek.next())
 }
