@@ -16,4 +16,3 @@ derive_builder = { path = "builder" }
 derive_debug = { path = "debug" }
 seq = { path = "seq" }
 sorted = { path = "sorted" }
-derive_prompt = { path = "prompt" }
