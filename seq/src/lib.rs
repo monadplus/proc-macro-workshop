@@ -1,4 +1,5 @@
 use proc_macro2::{TokenStream, TokenTree};
+use quote::format_ident;
 use syn::{braced, parse::Parse, parse_macro_input, Token};
 
 #[proc_macro]
@@ -60,6 +61,22 @@ impl Sequence {
                     let mut lit = proc_macro2::Literal::u64_unsuffixed(val);
                     lit.set_span(token.span());
                     TokenTree::from(lit)
+                }
+                // <prefix>~N
+                TokenTree::Ident(ref prefix) => {
+                    let mut peek = token_iter.clone();
+                    match (peek.next(), peek.next()) {
+                        (Some(TokenTree::Punct(punct)), Some(TokenTree::Ident(ref ident)))
+                            if punct.as_char() == '~' && ident == &self.var_name =>
+                        {
+                            token_iter.next(); // Consume '~'
+                            token_iter.next(); // Consume ident
+                            let mut ident = format_ident!("{}{}", prefix, val);
+                            ident.set_span(token.span());
+                            TokenTree::from(ident)
+                        }
+                        _ => token,
+                    }
                 }
                 // Expand content of (), {}, []
                 TokenTree::Group(ref group) => {
