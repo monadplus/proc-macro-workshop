@@ -1,6 +1,6 @@
 use proc_macro2::{TokenStream, TokenTree};
 use quote::format_ident;
-use syn::{braced, parse::Parse, parse_macro_input, Token};
+use syn::{braced, parse::Parse, parse_macro_input, LitInt, Token};
 
 #[proc_macro]
 pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -24,11 +24,13 @@ impl Parse for Sequence {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let var_name: syn::Ident = input.parse()?;
         input.parse::<Token![in]>()?;
-        let start: syn::LitInt = input.parse()?;
-        let start: u64 = start.base10_parse()?;
+        let start: u64 = input.parse::<LitInt>()?.base10_parse()?;
         input.parse::<Token![..]>()?;
-        let end: syn::LitInt = input.parse()?;
-        let end: u64 = end.base10_parse()?;
+        let inclusive = input.parse::<Option<Token![=]>>()?.is_some();
+        let mut end: u64 = input.parse::<LitInt>()?.base10_parse()?;
+        if inclusive {
+            end += 1;
+        }
         let content;
         braced!(content in input);
         let body: proc_macro2::TokenStream = content.parse()?;
