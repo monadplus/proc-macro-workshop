@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Fields};
+use syn::{parse_macro_input, parse_quote, DeriveInput, Fields};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -8,9 +8,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
         attrs: _,
         vis: _,
         ident: struct_ident,
-        generics: _,
+        generics,
         data,
     } = parse_macro_input!(input as DeriveInput);
+
+    let generics = add_trait_bounds(generics);
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let fields = match data {
         syn::Data::Struct(strct) => {
@@ -35,7 +38,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         .map(|field| get_debug_attr(&field).unwrap_or_else(|| String::from("{:?}")));
 
     let output = quote! {
-        impl ::std::fmt::Debug for #struct_ident {
+        impl #impl_generics ::std::fmt::Debug for #struct_ident #ty_generics #where_clause {
           fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
               f.debug_struct(stringify!(#struct_ident))
                   #(.field(stringify!(#field_names), &format_args!(#field_formats, &self.#field_names)))*
@@ -63,4 +66,13 @@ fn get_debug_attr(field: &syn::Field) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn add_trait_bounds(mut generics: syn::Generics) -> syn::Generics {
+    for param in &mut generics.params {
+        if let syn::GenericParam::Type(ref mut type_param) = *param {
+            type_param.bounds.push(parse_quote!(::std::fmt::Debug));
+        }
+    }
+    generics
 }
