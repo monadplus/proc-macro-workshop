@@ -9,12 +9,17 @@ use syn::{
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
-        attrs: _,
+        attrs,
         vis: _,
         ident: struct_ident,
         generics,
         data,
     } = parse_macro_input!(input as DeriveInput);
+
+    let bound_attr = match get_bound_attr(&attrs) {
+        Ok(bound_attr) => bound_attr,
+        Err(err) => return err.into_compile_error().into(),
+    };
 
     let fields = match data {
         syn::Data::Struct(strct) => {
@@ -60,7 +65,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    let generics = add_trait_bounds(generics, phantom_types, associated_types);
+    let generics = add_trait_bounds(generics, phantom_types, associated_types, bound_attr);
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let field_names = fields.iter().map(|field| {
@@ -105,40 +110,90 @@ fn get_debug_attr(field: &syn::Field) -> Option<String> {
     }
 }
 
+fn get_bound_attr(attrs: &[syn::Attribute]) -> Result<Option<syn::WherePredicate>, syn::Error> {
+    fn attr_error<T: quote::ToTokens>(tokens: T) -> syn::Error {
+        syn::Error::new_spanned(tokens, r#"expected `debug(bound = "..")`"#)
+    }
+
+    match attrs.get(0) {
+        Some(attr) => match attr.parse_meta() {
+            Ok(syn::Meta::List(meta_list)) => {
+                if !meta_list.path.is_ident("debug") {
+                    return Ok(None);
+                }
+
+                if meta_list.nested.len() != 1 {
+                    return Err(attr_error(meta_list.nested));
+                }
+
+                match &meta_list.nested[0] {
+                    syn::NestedMeta::Meta(syn::Meta::NameValue(name_value)) => {
+                        if !name_value.path.is_ident("bound") {
+                            return Err(attr_error(&name_value.path));
+                        }
+
+                        match &name_value.lit {
+                            syn::Lit::Str(lit_str) => {
+                                let bound_str = lit_str.value();
+                                match syn::parse_str::<syn::WherePredicate>(&bound_str) {
+                                    Ok(where_clause) => Ok(Some(where_clause)),
+                                    Err(err) => Err(syn::Error::new_spanned(&name_value.lit, err)),
+                                }
+                            }
+                            _ => Err(attr_error(&name_value.lit)),
+                        }
+                    }
+                    _ => Err(attr_error(&meta_list.nested[0])),
+                }
+            }
+            _ => Ok(None),
+        },
+
+        None => return Ok(None),
+    }
+}
+
 fn add_trait_bounds(
     mut generics: syn::Generics,
     phantom_types: Vec<&Ident>,
     associated_types: Vec<&TypePath>,
+    bound_attr: Option<syn::WherePredicate>,
 ) -> syn::Generics {
-    let associated_types_ident: Vec<&Ident> = associated_types
-        .iter()
-        .map(|type_path| &type_path.path.segments[0].ident)
-        .collect();
+    if let Some(where_clause) = bound_attr {
+        generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote!(#where_clause));
+    } else {
+        let associated_types_ident: Vec<&Ident> = associated_types
+            .iter()
+            .map(|type_path| &type_path.path.segments[0].ident)
+            .collect();
 
-    // impl <T: Debug, T2: Debug> Debug for Foo { ... }
-    for type_param in generics.type_params_mut() {
-        // Skip bound for phantom types.
-        if phantom_types.contains(&&type_param.ident) {
-            continue;
+        // impl <T: Debug, T2: Debug> Debug for Foo { ... }
+        for type_param in generics.type_params_mut() {
+            // Skip bound for phantom types.
+            if phantom_types.contains(&&type_param.ident) {
+                continue;
+            }
+
+            // Skip bound for associated types.
+            if associated_types_ident.contains(&&type_param.ident) {
+                continue;
+            }
+
+            type_param.bounds.push(parse_quote!(::std::fmt::Debug));
         }
 
-        // Skip bound for associated types.
-        if associated_types_ident.contains(&&type_param.ident) {
-            continue;
+        // impl <T: Debug, T2: Debug> Debug for Foo { ... } where <T3::Value>: Debug
+        let where_clause = generics.make_where_clause();
+        for associated_type in associated_types {
+            // Notice, here we need to pass the whole type and not only the ident.
+            where_clause.predicates.push(parse_quote! {
+                #associated_type : ::std::fmt::Debug
+            })
         }
-
-        type_param.bounds.push(parse_quote!(::std::fmt::Debug));
     }
-
-    // impl <T: Debug, T2: Debug> Debug for Foo { ... } where <T3::Value>: Debug
-    let where_clause = generics.make_where_clause();
-    for associated_type in associated_types {
-        // Notice, here we need to pass the whole type and not only the ident.
-        where_clause.predicates.push(parse_quote! {
-            #associated_type : ::std::fmt::Debug
-        })
-    }
-
     generics
 }
 
