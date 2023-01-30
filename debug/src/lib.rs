@@ -39,30 +39,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let phantom_types: Vec<&Ident> = fields
         .iter()
-        .filter_map(|field| {
-            let ty = &field.ty;
-            if let syn::Type::Path(type_path) = inner_type(ty, Some("PhantomData"))? {
-                let type_ident = &type_path.path.segments.first()?.ident;
-                if generic_idents.contains(&&type_ident) {
-                    return Some(type_ident);
-                }
-            }
-            None
-        })
+        .filter_map(|field| get_phantom_type_ident(&field.ty, &generic_idents))
         .collect::<Vec<_>>();
 
     let associated_types: Vec<&TypePath> = fields
         .iter()
-        .filter_map(|field| {
-            let ty = &field.ty;
-            if let syn::Type::Path(type_path) = associated_field(ty)? {
-                let type_ident = &type_path.path.segments.first()?.ident;
-                if generic_idents.contains(&&type_ident) {
-                    return Some(type_path);
-                }
-            }
-            None
-        })
+        .filter_map(|field| get_associated_field_type(&field.ty, &generic_idents))
         .collect::<Vec<_>>();
 
     let generics = add_trait_bounds(generics, phantom_types, associated_types, bound_attr);
@@ -197,7 +179,39 @@ fn add_trait_bounds(
     generics
 }
 
-/// Returns the type parameter of a type constructor e.g. `PhantomData<T> -> T`
+/// Retrieves the type parameter `T` of a phantom type `Phantom<T>`.
+fn get_phantom_type_ident<'a>(ty: &'a Type, generic_idents: &[Ident]) -> Option<&'a syn::Ident> {
+    if let syn::Type::Path(type_path) = inner_type(ty, Some("PhantomData"))? {
+        let type_ident = &type_path.path.segments.first()?.ident;
+        if generic_idents.contains(&&type_ident) {
+            return Some(type_ident);
+        }
+    }
+    None
+}
+
+/// Retrieves the inner most associated type e.g. `Box<Option<Vec<T::Value>> -> T::Value`.
+fn get_associated_field_type<'a>(
+    ty: &'a Type,
+    generic_idents: &[Ident],
+) -> Option<&'a syn::TypePath> {
+    let mut ty: &Type = ty;
+    while let Some(inner_type) = inner_type(&ty, None) {
+        ty = inner_type;
+    }
+
+    if let Type::Path(type_path @ TypePath { qself: None, path }) = ty {
+        if path.segments.len() > 1 {
+            let type_ident = &type_path.path.segments.first()?.ident;
+            if generic_idents.contains(&&type_ident) {
+                return Some(type_path);
+            }
+        }
+    }
+    None
+}
+
+/// Returns the type parameter of a type constructor e.g. `PhantomData<T> -> T`.
 fn inner_type<'a>(
     ty: &'a Type,
     wrapping_ty_ident: Option<&str>, /* None = ignore */
@@ -229,21 +243,6 @@ fn inner_type<'a>(
             if let GenericArgument::Type(ref ty) = inner_type.args[0] {
                 return Some(ty);
             }
-        }
-    }
-    None
-}
-
-/// Retrieve the inner most associated type e.g. Box<Option<Vec<T::Value>> -> T::Value
-fn associated_field<'a>(ty: &'a Type) -> Option<&'a syn::Type> {
-    let mut ty: &Type = ty;
-    while let Some(inner_type) = inner_type(&ty, None) {
-        ty = inner_type;
-    }
-
-    if let Type::Path(TypePath { qself: None, path }) = ty {
-        if path.segments.len() > 1 {
-            return Some(ty);
         }
     }
     None
