@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
-use quote::ToTokens;
+use quote::quote;
 use syn::parse_macro_input;
+use syn::visit_mut::VisitMut;
 
 #[proc_macro_attribute]
 pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -16,32 +17,103 @@ pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
     output
 }
 
-fn __sorted(
-    args: proc_macro2::TokenStream,
-    input: syn::Item,
-) -> Result<proc_macro2::TokenStream, syn::Error> {
-    let ienum = match input {
-        syn::Item::Enum(ienum) => ienum,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                args,
-                "expected enum or match expression",
-            ))
-        }
-    };
+fn __sorted(args: proc_macro2::TokenStream, input: syn::Item) -> Result<(), syn::Error> {
+    match input {
+        syn::Item::Enum(ienum) => {
+            let variants = ienum.variants.iter().map(|v| v.ident.clone()).collect();
 
-    for (i, v1) in ienum.variants.iter().enumerate() {
-        for v2 in ienum.variants.iter().skip(i + 1) {
-            if v1.ident > v2.ident {
+            check_order(variants, |ident: &syn::Ident| ident.to_string())?;
+
+            Ok(())
+        }
+        _ => Err(syn::Error::new_spanned(
+            args,
+            "expected enum or match expression",
+        )),
+    }
+}
+
+fn check_order<T1, T2, F>(v: Vec<T1>, f: F) -> Result<(), syn::Error>
+where
+    F: Fn(&T1) -> T2,
+    T1: quote::ToTokens,
+    T2: Ord + std::fmt::Display,
+{
+    for (i, v1) in v.iter().enumerate() {
+        for v2 in v.iter().skip(i + 1) {
+            let fv1 = f(v1);
+            let fv2 = f(v2);
+            if fv1 > fv2 {
                 return Err(syn::Error::new_spanned(
-                    &v2.ident,
-                    format!("{} should sort before {}", v2.ident, v1.ident),
+                    v2,
+                    format!("{} should sort before {}", fv2, fv1),
                 ));
             }
         }
     }
 
-    let output: proc_macro2::TokenStream = ienum.to_token_stream();
+    Ok(())
+}
 
-    Ok(output)
+#[proc_macro_attribute]
+pub fn check(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut item_fn = parse_macro_input!(input as syn::ItemFn);
+
+    let mut visitor = CheckVisitor { errors: vec![] };
+    visitor.visit_item_fn_mut(&mut item_fn);
+
+    let mut output = TokenStream::from(quote!(#item_fn));
+
+    for err in visitor.errors {
+        let err: TokenStream = err.into_compile_error().into();
+        output.extend(err);
+    }
+
+    output
+}
+
+struct CheckVisitor {
+    errors: Vec<syn::Error>,
+}
+
+impl VisitMut for CheckVisitor {
+    fn visit_expr_match_mut(&mut self, expr_match: &mut syn::ExprMatch) {
+        // Check if there's the attribute #[sorted] attr and remove it
+        if let Some(idx) = expr_match
+            .attrs
+            .iter()
+            .position(|attr| attr.path.is_ident("sorted"))
+        {
+            // Remove attribute to make code compile
+            expr_match.attrs.remove(idx);
+
+            let arms_path: Option<Vec<syn::Path>> = expr_match
+                .arms
+                .iter()
+                .map(|arm| match &arm.pat {
+                    syn::Pat::Path(pat_path) => Some(pat_path.path.clone()),
+                    syn::Pat::Struct(pat_struct) => Some(pat_struct.path.clone()),
+                    syn::Pat::TupleStruct(pat_tuple_struct) => Some(pat_tuple_struct.path.clone()),
+                    _ => {
+                        let err =
+                            syn::Error::new_spanned(&arm, "Not supported by #[sorted::check]");
+                        self.errors.push(err);
+                        None
+                    }
+                })
+                .collect();
+
+            if let Some(arms_path) = arms_path {
+                if let Err(err) = check_order(arms_path, |path: &syn::Path| {
+                    path.segments
+                        .iter()
+                        .map(|segment| quote!(#segment).to_string())
+                        .collect::<Vec<_>>()
+                        .join("::")
+                }) {
+                    self.errors.push(err);
+                }
+            }
+        }
+    }
 }
