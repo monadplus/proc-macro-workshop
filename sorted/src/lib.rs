@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use quote::ToTokens;
 use syn::parse_macro_input;
 
@@ -30,17 +29,15 @@ fn __sorted(
         }
     };
 
-    let unordered_pair = ienum
-        .variants
-        .iter()
-        .tuple_windows()
-        .find(|(v1, v2)| v1.ident > v2.ident);
-
-    if let Some((v1, v2)) = unordered_pair {
-        return Err(syn::Error::new_spanned(
-            v2,
-            format!("{} should sort before {}", v2.ident, v1.ident),
-        ));
+    for (i, v1) in ienum.variants.iter().enumerate() {
+        for v2 in ienum.variants.iter().skip(i + 1) {
+            if v1.ident > v2.ident {
+                return Err(syn::Error::new_spanned(
+                    v2,
+                    format!("{} should sort before {}", v2.ident, v1.ident),
+                ));
+            }
+        }
     }
 
     let output: proc_macro2::TokenStream = ienum.to_token_stream();
