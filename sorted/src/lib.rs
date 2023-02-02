@@ -94,9 +94,9 @@ impl VisitMut for CheckVisitor {
                     syn::Pat::Path(pat_path) => Some(pat_path.path.clone()),
                     syn::Pat::Struct(pat_struct) => Some(pat_struct.path.clone()),
                     syn::Pat::TupleStruct(pat_tuple_struct) => Some(pat_tuple_struct.path.clone()),
-                    _ => {
+                    otherwise => {
                         let err =
-                            syn::Error::new_spanned(&arm, "Not supported by #[sorted::check]");
+                            syn::Error::new_spanned(&otherwise, r#"unsupported by #[sorted]"#);
                         self.errors.push(err);
                         None
                     }
