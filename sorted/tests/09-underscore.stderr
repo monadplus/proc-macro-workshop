@@ -1,0 +1,5 @@
+error: wildcards must be placed last
+  --> tests/09-underscore.rs:25:13
+   |
+25 |             _ => "elsewhere",
+   |             ^

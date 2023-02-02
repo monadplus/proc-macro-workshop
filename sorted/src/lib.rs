@@ -87,14 +87,33 @@ impl VisitMut for CheckVisitor {
             // Remove attribute to make code compile
             expr_match.attrs.remove(idx);
 
+            // Check underscore is last
+            if let Some(idx) = expr_match
+                .arms
+                .iter()
+                .position(|arm| matches!(arm.pat, syn::Pat::Wild(_)))
+            {
+                if idx != expr_match.arms.len() - 1 {
+                    let wildcard_pat = expr_match.arms[idx].clone();
+                    let err = syn::Error::new_spanned(
+                        &wildcard_pat.pat,
+                        r#"wildcards must be placed last"#,
+                    );
+                    self.errors.push(err);
+                }
+            }
+
             let arms_path: Option<Vec<syn::Path>> = expr_match
                 .arms
                 .iter()
+                .filter(|arm| !matches!(arm.pat, syn::Pat::Wild(_)))
                 .map(|arm| match &arm.pat {
+                    syn::Pat::Ident(pat_ident) => Some(pat_ident.ident.clone().into()),
                     syn::Pat::Path(pat_path) => Some(pat_path.path.clone()),
                     syn::Pat::Struct(pat_struct) => Some(pat_struct.path.clone()),
                     syn::Pat::TupleStruct(pat_tuple_struct) => Some(pat_tuple_struct.path.clone()),
                     otherwise => {
+                        eprintln!("{:#?}", &otherwise);
                         let err =
                             syn::Error::new_spanned(&otherwise, r#"unsupported by #[sorted]"#);
                         self.errors.push(err);
