@@ -41,7 +41,7 @@ fn inner_type<'a>(outer_type: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> 
 // get_attr(&field, "builder") // Some(attr)
 // get_attr(&field, "foo") // None
 // ```
-fn get_attr<'a, 'b>(field: &'a syn::Field, attr_name: &'b str) -> Option<&'a syn::Attribute> {
+fn get_attr<'a>(field: &'a syn::Field, attr_name: &str) -> Option<&'a syn::Attribute> {
     let attrs = &field.attrs;
     if attrs.len() == 1 {
         let attr = &attrs[0];
@@ -52,7 +52,7 @@ fn get_attr<'a, 'b>(field: &'a syn::Field, attr_name: &'b str) -> Option<&'a syn
     None
 }
 
-fn get_builder_attr<'a>(field: &'a syn::Field) -> Option<&'a syn::Attribute> {
+fn get_builder_attr(field: &syn::Field) -> Option<&syn::Attribute> {
     get_attr(field, "builder")
 }
 
@@ -126,7 +126,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         let name = &field.ident;
         let ty = &field.ty;
         // Do not wrap neither Option nor Vec
-        if inner_type("Option", &ty).is_some() || get_builder_attr(field).is_some() {
+        if inner_type("Option", ty).is_some() || get_builder_attr(field).is_some() {
             quote!(#name: #ty)
         } else {
             quote!(#name: ::std::option::Option<#ty>)
@@ -144,9 +144,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let setter_fns = fields.iter().filter_map(|field| {
         let field_name = field.ident.as_ref().unwrap();
-        let ty = inner_type("Option", &field.ty).unwrap_or_else(|| &field.ty);
+        let ty = inner_type("Option", &field.ty).unwrap_or(&field.ty);
 
-        match get_builder_attr(&field) {
+        match get_builder_attr(field) {
             None => Some(quote! {
                 fn #field_name(&mut self, #field_name: #ty) -> &mut Self {
                     self.#field_name = ::std::option::Option::Some(#field_name);
@@ -154,7 +154,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             }),
 
-            Some(attr) => match get_attr_value(&attr) {
+            Some(attr) => match get_attr_value(attr) {
                 Some(value) if value == format!("{}", field_name) => None,
                 _ => Some(quote! {
                     fn #field_name(&mut self, #field_name: #ty) -> &mut Self {
@@ -169,7 +169,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let vec_setter_fns = fields.iter().filter_map(|field| {
         let field_name = field.ident.as_ref().unwrap();
         let ty = &field.ty;
-        let attr = get_builder_attr(&field)?;
+        let attr = get_builder_attr(field)?;
 
         match attr.parse_meta() {
             Ok(syn::Meta::List(meta_list)) => {
@@ -208,7 +208,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let build_fields_assignments = fields.iter().map(|field| {
         let field_name = field.ident.as_ref().unwrap();
         let ty = &field.ty;
-        if inner_type("Option", &ty).is_some() | get_builder_attr(&field).is_some() {
+        if inner_type("Option", ty).is_some() | get_builder_attr(field).is_some() {
             quote!(#field_name: self.#field_name.clone())
         } else {
             quote!(#field_name : self.#field_name.clone().ok_or(concat!(stringify!(#field_name), " is not set"))?)

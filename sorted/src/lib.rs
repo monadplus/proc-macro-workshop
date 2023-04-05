@@ -114,8 +114,7 @@ impl VisitMut for CheckVisitor {
                     syn::Pat::TupleStruct(pat_tuple_struct) => Some(pat_tuple_struct.path.clone()),
                     otherwise => {
                         eprintln!("{:#?}", &otherwise);
-                        let err =
-                            syn::Error::new_spanned(&otherwise, r#"unsupported by #[sorted]"#);
+                        let err = syn::Error::new_spanned(otherwise, r#"unsupported by #[sorted]"#);
                         self.errors.push(err);
                         None
                     }

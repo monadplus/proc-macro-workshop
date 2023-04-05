@@ -59,7 +59,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let field_formats = fields
         .iter()
-        .map(|field| get_debug_attr(&field).unwrap_or_else(|| String::from("{:?}")));
+        .map(|field| get_debug_attr(field).unwrap_or_else(|| String::from("{:?}")));
 
     let output = quote! {
         impl #impl_generics ::std::fmt::Debug for #struct_ident #ty_generics #where_clause {
@@ -131,7 +131,7 @@ fn get_bound_attr(attrs: &[syn::Attribute]) -> Result<Option<syn::WherePredicate
             _ => Ok(None),
         },
 
-        None => return Ok(None),
+        None => Ok(None),
     }
 }
 
@@ -183,7 +183,7 @@ fn add_trait_bounds(
 fn get_phantom_type_ident<'a>(ty: &'a Type, generic_idents: &[Ident]) -> Option<&'a syn::Ident> {
     if let syn::Type::Path(type_path) = inner_type(ty, Some("PhantomData"))? {
         let type_ident = &type_path.path.segments.first()?.ident;
-        if generic_idents.contains(&&type_ident) {
+        if generic_idents.contains(type_ident) {
             return Some(type_ident);
         }
     }
@@ -196,14 +196,14 @@ fn get_associated_field_type<'a>(
     generic_idents: &[Ident],
 ) -> Option<&'a syn::TypePath> {
     let mut ty: &Type = ty;
-    while let Some(inner_type) = inner_type(&ty, None) {
+    while let Some(inner_type) = inner_type(ty, None) {
         ty = inner_type;
     }
 
     if let Type::Path(type_path @ TypePath { qself: None, path }) = ty {
         if path.segments.len() > 1 {
             let type_ident = &type_path.path.segments.first()?.ident;
-            if generic_idents.contains(&&type_ident) {
+            if generic_idents.contains(type_ident) {
                 return Some(type_path);
             }
         }

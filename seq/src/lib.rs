@@ -78,7 +78,7 @@ impl Sequence {
                             repetition_found = true;
                             let stream =
                                 (self.start..self.end).fold(TokenStream::new(), |mut ts, i| {
-                                    let ts_aux = self.replace_number(group.stream().clone(), i);
+                                    let ts_aux = self.replace_number(group.stream(), i);
                                     ts.extend(ts_aux);
                                     ts
                                 });
