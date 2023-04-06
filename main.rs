@@ -5,4 +5,15 @@
 //
 // To run the code:
 //     $ cargo run
-fn main() {}
+#[derive(Debug, Default)]
+enum Letters {
+    #[default]
+    A, 
+    B, 
+    C,
+}
+
+fn main() {
+    let letter = Letters::default();
+    println!("{letter:?}")
+}
