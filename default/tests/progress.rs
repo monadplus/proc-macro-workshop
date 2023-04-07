@@ -5,9 +5,8 @@ fn tests() {
     t.pass("tests/02-unnamed.rs");
     t.pass("tests/03-named.rs");
     t.pass("tests/04-generics.rs");
-    // t.pass("tests/05-associated-type.rs");
-
-    // Test: doesn't work for struct
+    t.compile_fail("tests/05-struct.rs");
     // Test: does't work for empty
     // Test: does't work when more than one default
+    // t.pass("tests/XX-associated-type.rs");
 }

@@ -21,7 +21,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let variants = match data {
         syn::Data::Enum(enm) => enm.variants,
-        other => unimplemented!("Default is not supported for {:?}", other),
+        _other => {
+            return compile_err(
+                struct_ident,
+                "#[derive(Default)] is only supported for enums",
+            );
+        }
     };
 
     if variants.is_empty() {
