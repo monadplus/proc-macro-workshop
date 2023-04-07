@@ -4,7 +4,8 @@ fn tests() {
     t.pass("tests/01-unit.rs");
     t.pass("tests/02-unnamed.rs");
     t.pass("tests/03-named.rs");
-    // t.pass("tests/04-generics.rs");
+    t.pass("tests/04-generics.rs");
+    // t.pass("tests/05-associated-type.rs");
 
     // Test: doesn't work for struct
     // Test: does't work for empty
