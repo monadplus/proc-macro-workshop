@@ -7,6 +7,6 @@ fn tests() {
     t.pass("tests/04-generics.rs");
     t.compile_fail("tests/05-struct.rs");
     t.compile_fail("tests/06-empty.rs");
-    // Test: does't work when more than one default
+    t.compile_fail("tests/07-more-than-one.rs");
     // t.pass("tests/XX-associated-type.rs");
 }

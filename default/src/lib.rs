@@ -88,7 +88,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             }
         };
-        // eprintln!("{}", output);
+
         proc_macro::TokenStream::from(output)
     } else {
         compile_err(struct_ident, "expected one variant with #[default]")
