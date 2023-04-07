@@ -29,7 +29,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
         unimplemented!("Default is not supported for empty enums");
     }
 
-    // Look for a variant with #[default]
     let mut default_variants = variants
         .into_iter()
         .filter(|variant| has_default_attr(&variant).unwrap_or_default());
@@ -41,15 +40,23 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 "#[default] is defined more than once",
             );
         }
+        let variant_ident = default_variant.ident;
         let default_variant_constr = match default_variant.fields {
             syn::Fields::Unit => {
-                let variant_ident = default_variant.ident;
                 quote! {
                     Self::#variant_ident
                 }
             }
+            syn::Fields::Unnamed(unnamed) => {
+                let fields_constr = unnamed.unnamed.iter().map(|field| {
+                    let ty = &field.ty;
+                    quote!(#ty::default())
+                });
+                quote! {
+                    Self::#variant_ident(#(#fields_constr),*)
+                }
+            }
             syn::Fields::Named(_) => unimplemented!(),
-            syn::Fields::Unnamed(_) => unimplemented!(),
         };
 
         let output = quote! {
