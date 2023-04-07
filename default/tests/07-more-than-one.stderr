@@ -1,6 +1,0 @@
-error: #[default] is defined more than once
-  --> tests/07-more-than-one.rs:16:5
-   |
-16 | /     #[default]
-17 | |     B(B)
-   | |________^
