@@ -48,15 +48,26 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             }
             syn::Fields::Unnamed(unnamed) => {
-                let fields_constr = unnamed.unnamed.iter().map(|field| {
-                    let ty = &field.ty;
+                let fields_constr = unnamed.unnamed.into_iter().map(|field| {
+                    let ty = field.ty;
                     quote!(#ty::default())
                 });
+
                 quote! {
                     Self::#variant_ident(#(#fields_constr),*)
                 }
             }
-            syn::Fields::Named(_) => unimplemented!(),
+            syn::Fields::Named(named) => {
+                let fields_constr = named.named.into_iter().map(|field| {
+                    let field_name = field.ident.expect("named fields should contain an ident");
+                    let ty = &field.ty;
+                    quote!(#field_name : #ty::default())
+                });
+
+                quote! {
+                    Self::#variant_ident{#(#fields_constr),*}
+                }
+            }
         };
 
         let output = quote! {
