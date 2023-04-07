@@ -30,7 +30,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
 
     if variants.is_empty() {
-        unimplemented!("Default is not supported for empty enums");
+        return compile_err(
+            struct_ident,
+            "#[derive(Default)] is not supported for empty enums",
+        );
     }
 
     let mut default_variants = variants
