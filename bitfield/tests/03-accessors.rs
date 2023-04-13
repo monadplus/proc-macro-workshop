@@ -40,4 +40,12 @@ fn main() {
     assert_eq!(0, bitfield.get_b());
     assert_eq!(14, bitfield.get_c());
     assert_eq!(0, bitfield.get_d());
+
+    bitfield.set_a(1);
+    bitfield.set_b(5);
+    bitfield.set_d(0xF81);
+    assert_eq!(1, bitfield.get_a());
+    assert_eq!(5, bitfield.get_b());
+    assert_eq!(14, bitfield.get_c());
+    assert_eq!(0xF81, bitfield.get_d());
 }
