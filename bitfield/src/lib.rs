@@ -1,9 +1,8 @@
+pub use bitfield_impl::{bitfield, generate_mod8_impls, generate_specifiers};
 use std::{
     cmp::min,
     ops::{AddAssign, Shl, ShrAssign},
 };
-
-pub use bitfield_impl::{bitfield, generate_specifiers};
 
 // We are actually storing the value in big endian to avoid the reverse
 // We could actually use https://doc.rust-lang.org/std/primitive.u8.html#method.to_be
@@ -15,6 +14,7 @@ pub trait Specifier {
         + Shl<usize, Output = Self::TypeRepr>
         + ShrAssign<usize>
         + LastByte;
+    type Mod8;
 
     fn get(data: &[u8], offset: usize) -> Self::TypeRepr {
         let mut byte_idx = offset / 8;
@@ -94,6 +94,26 @@ pub trait LastByte: Copy {
 
 bitfield_impl::generate_specifiers!();
 
+pub struct ZeroMod8;
+pub struct OneMod8;
+pub struct TwoMod8;
+pub struct ThreeMod8;
+pub struct FourMod8;
+pub struct FiveMod8;
+pub struct SixMod8;
+pub struct SevenMod8;
+
+pub trait TotalSizeIsMultipleOfEightBits {}
+impl TotalSizeIsMultipleOfEightBits for ZeroMod8 {}
+
+pub trait CAddMod8<Rhs> {
+    type Output;
+}
+
+pub type AddMod8<Lhs, Rhs> = <Lhs as CAddMod8<Rhs>>::Output;
+
+bitfield_impl::generate_mod8_impls!();
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,5 +150,20 @@ mod tests {
         B4::set(&mut data, 0, 0b0000);
         B4::set(&mut data, 1, 0b1111);
         assert_eq!(B4::get(&data, 0), 0b1110);
+    }
+
+    #[test]
+    fn add_mod8_test() {
+        struct _AssertAddZeroZeroMultiple8
+        where
+            AddMod8<ZeroMod8, ZeroMod8>: TotalSizeIsMultipleOfEightBits;
+
+        struct _AssertAddOneSevenMultiple8
+        where
+            AddMod8<OneMod8, SevenMod8>: TotalSizeIsMultipleOfEightBits;
+
+        struct _AssertAddTwoSixMultiple8
+        where
+            AddMod8<TwoMod8, SixMod8>: TotalSizeIsMultipleOfEightBits;
     }
 }

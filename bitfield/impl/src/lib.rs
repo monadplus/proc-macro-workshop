@@ -57,12 +57,23 @@ pub fn bitfield(
 
     let tys = fields.into_iter().map(|field| field.ty);
 
-    // TODO: check size is multiple of 8; otherwise this won't work
+    let assert_mod8 = {
+        let ty_mod = tys.clone().fold(
+            quote!(ZeroMod8),
+            |acc_mod, ty| quote!(AddMod8<#acc_mod, <#ty as Specifier>::Mod8>),
+        );
+        quote_spanned! {struct_ident.span() =>
+            struct _AssertMod8 where #ty_mod: ::bitfield::TotalSizeIsMultipleOfEightBits;
+        }
+    };
+
     let size = quote!((#(<#tys as Specifier>::BITS)+*) / 8);
 
     let (impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
 
     let output = quote! {
+        #assert_mod8
+
         #[repr(C)]
         #vis struct #struct_ident #ty_generics {
             data: [u8; #size],
@@ -94,12 +105,24 @@ pub fn generate_specifiers(_input: proc_macro::TokenStream) -> proc_macro::Token
             33..=64 => quote!(u64),
             _ => unreachable!(),
         };
+        let type_mod8 = match index {
+            i if i % 8 == 0 => quote!(ZeroMod8),
+            i if i % 8 == 1 => quote!(OneMod8),
+            i if i % 8 == 2 => quote!(TwoMod8),
+            i if i % 8 == 3 => quote!(ThreeMod8),
+            i if i % 8 == 4 => quote!(FourMod8),
+            i if i % 8 == 5 => quote!(FiveMod8),
+            i if i % 8 == 6 => quote!(SixMod8),
+            i if i % 8 == 7 => quote!(SevenMod8),
+            _ => unreachable!(),
+        };
         quote! {
             pub enum #s_ident {}
 
             impl Specifier for #s_ident {
                 const BITS: usize = #index;
                 type TypeRepr = #type_repr;
+                type Mod8 = #type_mod8;
             }
         }
     });
@@ -117,6 +140,40 @@ pub fn generate_specifiers(_input: proc_macro::TokenStream) -> proc_macro::Token
 
     output.extend(specifiers);
     output.extend(last_byte_impls);
+
+    proc_macro::TokenStream::from(output)
+}
+
+#[proc_macro]
+pub fn generate_mod8_impls(_input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut output = TokenStream::new();
+
+    let values = [
+        Ident::new("ZeroMod8", Span::call_site()),
+        Ident::new("OneMod8", Span::call_site()),
+        Ident::new("TwoMod8", Span::call_site()),
+        Ident::new("ThreeMod8", Span::call_site()),
+        Ident::new("FourMod8", Span::call_site()),
+        Ident::new("FiveMod8", Span::call_site()),
+        Ident::new("SixMod8", Span::call_site()),
+        Ident::new("SevenMod8", Span::call_site()),
+    ];
+
+    let impls: Vec<TokenStream> = values
+        .clone()
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, lhs)| {
+            let values = &values;
+            values.clone().into_iter().enumerate().map(move |(j, rhs)| {
+                let output = values[(i + j) % 8].clone();
+                quote! {
+                    impl CAddMod8<#rhs> for #lhs { type Output = #output; }
+                }
+            })
+        })
+        .collect();
+    output.extend(impls);
 
     proc_macro::TokenStream::from(output)
 }

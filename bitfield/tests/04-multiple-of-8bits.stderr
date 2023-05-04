@@ -1,8 +1,9 @@
-error[E0277]: the trait bound `bitfield::checks::SevenMod8: bitfield::checks::TotalSizeIsMultipleOfEightBits` is not satisfied
-  --> tests/04-multiple-of-8bits.rs:53:1
+error[E0277]: the trait bound `SevenMod8: TotalSizeIsMultipleOfEightBits` is not satisfied
+  --> tests/04-multiple-of-8bits.rs:54:12
    |
-53 | #[bitfield]
-   | ^^^^^^^^^^^ the trait `bitfield::checks::TotalSizeIsMultipleOfEightBits` is not implemented for `bitfield::checks::SevenMod8`
+54 | pub struct NotQuiteFourBytes {
+   |            ^^^^^^^^^^^^^^^^^ the trait `TotalSizeIsMultipleOfEightBits` is not implemented for `SevenMod8`
    |
-   = help: the trait `bitfield::checks::TotalSizeIsMultipleOfEightBits` is implemented for `bitfield::checks::ZeroMod8`
-   = note: this error originates in the attribute macro `bitfield` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = help: the trait `TotalSizeIsMultipleOfEightBits` is implemented for `bitfield::ZeroMod8`
+   = help: see issue #48214
+   = help: add `#![feature(trivial_bounds)]` to the crate attributes to enable
