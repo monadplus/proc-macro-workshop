@@ -1,8 +1,8 @@
-use std::fmt::Display;
+use std::{collections::HashSet, fmt::Display};
 
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Fields, Ident};
+use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Fields, Ident, Lit, Variant};
 
 #[allow(dead_code)]
 fn error<U: Display, T: ToTokens>(message: U, tokens: T) -> proc_macro::TokenStream {
@@ -92,37 +92,50 @@ pub fn bitfield(
     proc_macro::TokenStream::from(output)
 }
 
+fn get_int_repr(value: usize) -> TokenStream {
+    match value {
+        0..=8 => quote!(u8),
+        9..=16 => quote!(u16),
+        17..=32 => quote!(u32),
+        33..=64 => quote!(u64),
+        _ => unreachable!(),
+    }
+}
+
+fn get_type_mod8(value: usize) -> TokenStream {
+    match value {
+        i if i % 8 == 0 => quote!(ZeroMod8),
+        i if i % 8 == 1 => quote!(OneMod8),
+        i if i % 8 == 2 => quote!(TwoMod8),
+        i if i % 8 == 3 => quote!(ThreeMod8),
+        i if i % 8 == 4 => quote!(FourMod8),
+        i if i % 8 == 5 => quote!(FiveMod8),
+        i if i % 8 == 6 => quote!(SixMod8),
+        i if i % 8 == 7 => quote!(SevenMod8),
+        _ => unreachable!(),
+    }
+}
+
 #[proc_macro]
 pub fn generate_specifiers(_input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut output = TokenStream::new();
 
     let specifiers = (1..=64).map(|index: usize| {
         let s_ident = Ident::new(&format!("B{}", index), Span::call_site());
-        let type_repr = match index {
-            0..=8 => quote!(u8),
-            9..=16 => quote!(u16),
-            17..=32 => quote!(u32),
-            33..=64 => quote!(u64),
-            _ => unreachable!(),
-        };
-        let type_mod8 = match index {
-            i if i % 8 == 0 => quote!(ZeroMod8),
-            i if i % 8 == 1 => quote!(OneMod8),
-            i if i % 8 == 2 => quote!(TwoMod8),
-            i if i % 8 == 3 => quote!(ThreeMod8),
-            i if i % 8 == 4 => quote!(FourMod8),
-            i if i % 8 == 5 => quote!(FiveMod8),
-            i if i % 8 == 6 => quote!(SixMod8),
-            i if i % 8 == 7 => quote!(SevenMod8),
-            _ => unreachable!(),
-        };
+        let int_repr = get_int_repr(index);
+        let type_mod8 = get_type_mod8(index);
         quote! {
             pub enum #s_ident {}
 
             impl Specifier for #s_ident {
                 const BITS: usize = #index;
-                type TypeRepr = #type_repr;
+                type TypeRepr = #int_repr;
+                type IntRepr = #int_repr;
                 type Mod8 = #type_mod8;
+
+                fn to_type_repr(x: Self::IntRepr) -> Self::TypeRepr {
+                    x
+                }
             }
         }
     });
@@ -176,4 +189,108 @@ pub fn generate_mod8_impls(_input: proc_macro::TokenStream) -> proc_macro::Token
     output.extend(impls);
 
     proc_macro::TokenStream::from(output)
+}
+
+#[proc_macro_derive(BitfieldSpecifier)]
+pub fn derive_bitfield_specifier(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let DeriveInput {
+        attrs: _,
+        vis: _,
+        ident: enum_ident,
+        generics: _,
+        data,
+    } = parse_macro_input!(input as DeriveInput);
+
+    let variants = match data {
+        syn::Data::Enum(e) => e.variants,
+        other => unimplemented!("BitfieldSpecifier is not supported for {:?}", other),
+    };
+    let n_variants = variants.len();
+
+    if n_variants == 0 {
+        return syn::Error::new_spanned(enum_ident, r#"Empty enums are not allowed"#)
+            .into_compile_error()
+            .into();
+    }
+
+    if !n_variants.is_power_of_two() {
+        return syn::Error::new_spanned(enum_ident, r#"Number of variants must be power of two"#)
+            .into_compile_error()
+            .into();
+    }
+
+    let bits = n_variants.ilog2() as usize;
+    let int_repr = get_int_repr(bits);
+    let type_mod8 = get_type_mod8(bits);
+
+    let mut discriminants: HashSet<usize> = HashSet::with_capacity(n_variants);
+    for variant in variants.iter() {
+        let err = |msg: &str| {
+            let error = syn::Error::new_spanned(variant, msg).into_compile_error();
+            proc_macro::TokenStream::from(error)
+        };
+        match get_discriminant(variant) {
+            None => return err("Missing discriminant - not supported yet"),
+            Some(discriminant) => {
+                let not_in_range_err = err(&format!(r#"Valid range [0-{}]"#, n_variants - 1));
+
+                if discriminant < 0 {
+                    return not_in_range_err;
+                }
+
+                let discriminant = discriminant as usize;
+                if discriminant >= n_variants {
+                    return not_in_range_err;
+                }
+
+                // Discriminants cannot be repeated, otherwise you won't cover the whole range.
+                if !discriminants.insert(discriminant) {
+                    return err("Repeated discriminant");
+                }
+            }
+        }
+    }
+
+    let type_repr_cases = variants.into_iter().map(|variant| {
+        let ident = variant.ident;
+        let case_ident = { Ident::new(&ident.to_string().to_lowercase(), ident.span()) };
+        quote!( #case_ident if #case_ident == Self::#ident as Self::IntRepr => Self::#ident )
+    });
+
+    let output = quote! {
+        impl From<#enum_ident> for #int_repr {
+            fn from(type_repr: #enum_ident) -> #int_repr {
+                // Safety: the macro guarantees the correct size of the discriminants
+                type_repr as #int_repr
+            }
+        }
+
+        impl Specifier for #enum_ident {
+            const BITS: usize = #bits;
+            type TypeRepr = Self;
+            type IntRepr = #int_repr;
+            type Mod8 = #type_mod8;
+
+            fn to_type_repr(int_repr: Self::IntRepr) -> Self::TypeRepr {
+                match int_repr {
+                    #(#type_repr_cases,)*
+                    _ => unreachable!("`IntRepr` range should have been covered."),
+                }
+            }
+        }
+    };
+
+    proc_macro::TokenStream::from(output)
+}
+
+fn get_discriminant(variant: &Variant) -> Option<isize> {
+    variant.discriminant.as_ref().map(|(_, expr)| match expr {
+        syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
+            Lit::Int(lit) => lit
+                .base10_parse()
+                .expect("Enum discriminants should be `isize`"),
+            other => unreachable!("{:?} not expected", other),
+        },
+        _ => unreachable!("All discriminants must be positive integers"),
+    })
 }

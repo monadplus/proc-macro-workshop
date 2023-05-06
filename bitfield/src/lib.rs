@@ -1,26 +1,34 @@
-pub use bitfield_impl::{bitfield, generate_mod8_impls, generate_specifiers};
 use std::{
     cmp::min,
     ops::{AddAssign, Shl, ShrAssign},
 };
+
+pub use bitfield_impl::{bitfield, generate_mod8_impls, generate_specifiers, BitfieldSpecifier};
 
 // We are actually storing the value in big endian to avoid the reverse
 // We could actually use https://doc.rust-lang.org/std/primitive.u8.html#method.to_be
 
 pub trait Specifier {
     const BITS: usize;
-    type TypeRepr: From<u8>
+
+    type TypeRepr;
+
+    type IntRepr: From<u8>
+        + From<Self::TypeRepr>
         + AddAssign
-        + Shl<usize, Output = Self::TypeRepr>
+        + Shl<usize, Output = Self::IntRepr>
         + ShrAssign<usize>
         + LastByte;
+
     type Mod8;
+
+    fn to_type_repr(int_repr: Self::IntRepr) -> Self::TypeRepr;
 
     fn get(data: &[u8], offset: usize) -> Self::TypeRepr {
         let mut byte_idx = offset / 8;
         let mut start_offset = offset % 8;
         let mut rem_bits = Self::BITS;
-        let mut result = Self::TypeRepr::from(0u8);
+        let mut result = Self::IntRepr::from(0u8);
         while rem_bits > 0 {
             let rem_bits_current_byte = min(8 - start_offset, rem_bits);
             let value: u8 = if rem_bits_current_byte == 8 {
@@ -28,15 +36,17 @@ pub trait Specifier {
             } else {
                 data[byte_idx].value_from_bits(start_offset, rem_bits_current_byte)
             };
-            result += Self::TypeRepr::from(value) << (Self::BITS - rem_bits);
+            result += Self::IntRepr::from(value) << (Self::BITS - rem_bits);
             rem_bits -= rem_bits_current_byte;
             byte_idx += 1;
             start_offset = 0;
         }
-        result
+
+        Self::to_type_repr(result)
     }
 
-    fn set(data: &mut [u8], offset: usize, mut value: Self::TypeRepr) {
+    fn set(data: &mut [u8], offset: usize, value: Self::TypeRepr) {
+        let mut value = Self::IntRepr::from(value);
         let mut byte_idx = offset / 8;
         let mut start_offset = offset % 8;
         let mut rem_bits = Self::BITS;
@@ -61,6 +71,21 @@ pub trait Specifier {
             rem_bits -= rem_bits_current_byte;
             byte_idx += 1;
             start_offset = 0;
+        }
+    }
+}
+
+impl Specifier for bool {
+    const BITS: usize = 1;
+    type TypeRepr = Self;
+    type IntRepr = u8;
+    type Mod8 = OneMod8;
+
+    fn to_type_repr(int_repr: Self::IntRepr) -> Self::TypeRepr {
+        match int_repr {
+            0 => false,
+            1 => true,
+            _ => unreachable!(),
         }
     }
 }
