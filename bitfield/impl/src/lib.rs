@@ -1,8 +1,9 @@
 use std::{collections::HashSet, fmt::Display};
 
+use either::Either;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Fields, Ident, Lit, Variant};
+use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Expr, Fields, Ident, Lit, Variant};
 
 #[allow(dead_code)]
 fn error<U: Display, T: ToTokens>(message: U, tokens: T) -> proc_macro::TokenStream {
@@ -229,24 +230,24 @@ pub fn derive_bitfield_specifier(input: proc_macro::TokenStream) -> proc_macro::
             let error = syn::Error::new_spanned(variant, msg).into_compile_error();
             proc_macro::TokenStream::from(error)
         };
-        match get_discriminant(variant) {
-            None => return err("Missing discriminant - not supported yet"),
-            Some(discriminant) => {
-                let not_in_range_err = err(&format!(r#"Valid range [0-{}]"#, n_variants - 1));
+        // We only validate explicit discriminants.
+        // We can assume that rust discriminants are always valid.
+        // TODO: validate const variables discriminants
+        if let Some(Either::Left(discriminant)) = get_discriminant(variant) {
+            let not_in_range_err = err(&format!(r#"Valid range [0-{}]"#, n_variants - 1));
 
-                if discriminant < 0 {
-                    return not_in_range_err;
-                }
+            if discriminant < 0 {
+                return not_in_range_err;
+            }
 
-                let discriminant = discriminant as usize;
-                if discriminant >= n_variants {
-                    return not_in_range_err;
-                }
+            let discriminant = discriminant as usize;
+            if discriminant >= n_variants {
+                return not_in_range_err;
+            }
 
-                // Discriminants cannot be repeated, otherwise you won't cover the whole range.
-                if !discriminants.insert(discriminant) {
-                    return err("Repeated discriminant");
-                }
+            // Discriminants cannot be repeated, otherwise you won't cover the whole range.
+            if !discriminants.insert(discriminant) {
+                return err("Repeated discriminant");
             }
         }
     }
@@ -283,14 +284,21 @@ pub fn derive_bitfield_specifier(input: proc_macro::TokenStream) -> proc_macro::
     proc_macro::TokenStream::from(output)
 }
 
-fn get_discriminant(variant: &Variant) -> Option<isize> {
-    variant.discriminant.as_ref().map(|(_, expr)| match expr {
-        syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
-            Lit::Int(lit) => lit
-                .base10_parse()
-                .expect("Enum discriminants should be `isize`"),
-            other => unreachable!("{:?} not expected", other),
-        },
-        _ => unreachable!("All discriminants must be positive integers"),
-    })
+fn get_discriminant(variant: &Variant) -> Option<Either<isize, &Ident>> {
+    variant
+        .discriminant
+        .as_ref()
+        .and_then(|(_, expr)| match expr {
+            Expr::Lit(expr_lit) => match &expr_lit.lit {
+                Lit::Int(lit) => {
+                    let value = lit
+                        .base10_parse()
+                        .expect("Enum discriminants should be `isize`");
+                    Some(Either::Left(value))
+                }
+                _ => None,
+            },
+            Expr::Path(expr_path) => expr_path.path.get_ident().map(Either::Right),
+            _ => None,
+        })
 }
