@@ -215,6 +215,7 @@ pub fn derive_bitfield_specifier(input: proc_macro::TokenStream) -> proc_macro::
     }
 
     if !n_variants.is_power_of_two() {
+        // syn::Error::new(Span::call_site(), "...")
         return syn::Error::new_spanned(enum_ident, r#"Number of variants must be power of two"#)
             .into_compile_error()
             .into();
