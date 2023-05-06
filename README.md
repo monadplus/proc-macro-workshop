@@ -1,14 +1,11 @@
-# Rust Latam: procedural macros workshop (solutions)
+# Rust Latam: procedural macros workshop
 
-List of macros:
-- [x] builder
-- [x] seq
-- [x] sorted
-- [x] debug
-- [ ] bitfiled
-
-Extra:
-- [x] default
+Completed:
+- [x] [builder](./builder)
+- [x] [seq](./seq)
+- [x] [sorted](./sorted)
+- [x] [debug](./debug)
+- [x] [bitfield](./bitfield)
 
 ### License
 
