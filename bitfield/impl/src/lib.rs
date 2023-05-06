@@ -3,7 +3,10 @@ use std::{collections::HashSet, fmt::Display};
 use either::Either;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, DeriveInput, Expr, Fields, Ident, Lit, Variant};
+use syn::{
+    parse_macro_input, spanned::Spanned, DeriveInput, Expr, Field, Fields, Ident, Lit, Meta,
+    Variant,
+};
 
 #[allow(dead_code)]
 fn error<U: Display, T: ToTokens>(message: U, tokens: T) -> proc_macro::TokenStream {
@@ -56,7 +59,7 @@ pub fn bitfield(
         Some(output)
     });
 
-    let tys = fields.into_iter().map(|field| field.ty);
+    let tys = fields.clone().into_iter().map(|field| field.ty);
 
     let assert_mod8 = {
         let ty_mod = tys.clone().fold(
@@ -68,11 +71,21 @@ pub fn bitfield(
         }
     };
 
+    let assert_bits_attrs = fields.into_iter().filter_map(|field| {
+        let (span, expected_size) = get_bits_attr(&field)?;
+        let ty = field.ty;
+
+        Some(quote_spanned! {span =>
+            const _: [(); #expected_size] = [(); <#ty as Specifier>::BITS];
+        })
+    });
+
     let size = quote!((#(<#tys as Specifier>::BITS)+*) / 8);
 
     let (impl_generics, ty_generics, _where_clause) = generics.split_for_impl();
 
     let output = quote! {
+        #(#assert_bits_attrs)*
         #assert_mod8
 
         #[repr(C)]
@@ -231,9 +244,8 @@ pub fn derive_bitfield_specifier(input: proc_macro::TokenStream) -> proc_macro::
             let error = syn::Error::new_spanned(variant, msg).into_compile_error();
             proc_macro::TokenStream::from(error)
         };
-        // We only validate explicit discriminants.
-        // We can assume that rust discriminants are always valid.
-        // TODO: validate const variables discriminants
+
+        // TODO: validate const discriminants
         if let Some(Either::Left(discriminant)) = get_discriminant(variant) {
             let not_in_range_err = err(&format!(r#"Valid range [0-{}]"#, n_variants - 1));
 
@@ -302,4 +314,29 @@ fn get_discriminant(variant: &Variant) -> Option<Either<isize, &Ident>> {
             Expr::Path(expr_path) => expr_path.path.get_ident().map(Either::Right),
             _ => None,
         })
+}
+
+// #[bitfield]
+// pub struct RedirectionTableEntry {
+//     #[bits = 1]
+//     trigger_mode: TriggerMode,
+//     ...
+// }
+fn get_bits_attr(field: &Field) -> Option<(Span, usize)> {
+    let attr = field.attrs.get(0)?;
+    match attr.meta {
+        Meta::NameValue(ref name_value) => {
+            if !name_value.path.is_ident("bits") {
+                return None;
+            }
+            match &name_value.value {
+                Expr::Lit(expr_lit) => match &expr_lit.lit {
+                    Lit::Int(lit) => Some((name_value.value.span(), lit.base10_parse().unwrap())),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
