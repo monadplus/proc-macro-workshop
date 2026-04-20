@@ -10,35 +10,46 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let fields = match input.data {
         syn::Data::Struct(s) => match s.fields {
             syn::Fields::Named(fields) => fields,
-            _ => unimplemented!("Builder macro requires named fields structs"),
+            _ => unimplemented!("Only named fields are supported"),
         },
-        other => unimplemented!("Builder macro does not support {}", other),
+        other => unimplemented!("Builder macro does not support {:?}", other),
     };
 
+    let builder_name = format_ident!("{}Builder", struct_name);
     let builder_fields = fields.named.iter().map(|field| {
         let name = &field.ident;
         let ty = &field.ty;
         quote_spanned! {field.span()=>
-            #name : Option<#ty>
+            #name : ::std::option::Option<#ty>
         }
     });
 
-    let builder_name = format_ident!("{}Builder", struct_name);
-    let builder_struct = quote! {
-        pub struct #builder_name {
-            #(#builder_fields),*
-        }
-    };
-
     let default_builder_fields = fields.named.iter().map(|field| {
-        let field_name = &field.ident;
-        quote_spanned! {field.span()=>
-            #field_name : None
+        let name = &field.ident;
+        quote! {
+            #name : ::std::option::Option::None
+        }
+    });
+
+    let setter_fns = fields.named.iter().map(|field| {
+        let name = &field.ident;
+        let ty = &field.ty;
+        quote! {
+            pub fn #name (&mut self, #name: #ty) -> &mut Self {
+                self.#name = ::std::option::Option::Some(#name);
+                self
+            }
         }
     });
 
     let output = quote! {
-        #builder_struct
+        pub struct #builder_name {
+            #(#builder_fields),*
+        }
+
+        impl #builder_name {
+            #(#setter_fns)*
+        }
 
         impl #struct_name {
             pub fn builder() -> #builder_name {
