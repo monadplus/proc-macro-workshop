@@ -42,12 +42,30 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
     });
 
+    let build_fn = {
+        let field_assigns = fields.named.iter().map(|field| {
+            let name = &field.ident;
+            quote! {
+                #name: self.#name.take().ok_or_else(|| format!("{} not set", stringify!(#name)))?
+            }
+        });
+
+        quote! {
+            pub fn build(&mut self) -> ::std::result::Result<#struct_name, ::std::boxed::Box<dyn ::std::error::Error>> {
+                Ok(#struct_name {
+                    #(#field_assigns),*
+                })
+            }
+        }
+    };
+
     let output = quote! {
         pub struct #builder_name {
             #(#builder_fields),*
         }
 
         impl #builder_name {
+            #build_fn
             #(#setter_fns)*
         }
 
@@ -59,6 +77,8 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
     };
+
+    // eprintln!("{}", output);
 
     proc_macro::TokenStream::from(output)
 }
