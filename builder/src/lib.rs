@@ -70,7 +70,7 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
                     }
                 };
 
-                let each_setter = builder_attr(&field)?.map(|setter_name| {
+                let each_setter = builder_attr(field)?.map(|setter_name| {
                     let setter_name = Ident::new(&setter_name, Span::call_site());
                     // If the new one-at-a-time builder method is given the same name as the field,
                     // avoid generating an all-at-once builder method for that field because the
@@ -148,7 +148,7 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     Ok(output)
 }
 
-fn builder_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
+fn builder_attr(field: &Field) -> Result<Option<String>, syn::Error> {
     let mut each_value = None;
 
     for attr in &field.attrs {
