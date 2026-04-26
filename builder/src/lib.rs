@@ -164,7 +164,7 @@ fn builder_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
                 return Ok(());
             }
 
-            Err(meta.error("expected #[builder(each = \"...\")]"))
+            Err(meta.error(r#"expected `builder(each = "...")`"#))
         })?
     }
 
