@@ -1,8 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{DeriveInput, spanned::Spanned};
+use syn::{DeriveInput, Field, spanned::Spanned};
 
-#[proc_macro_derive(CustomDebug)]
+#[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
     let output = derive(input).unwrap_or_else(syn::Error::into_compile_error);
@@ -22,12 +22,17 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         other => unimplemented!("Builder macro does not support {:?}", other),
     };
 
-    let debug_struct_fields = fields.named.iter().map(|f| {
-        let f_ident = &f.ident.as_ref().expect("Named fields should have an ident");
-        quote_spanned!(f.span() =>
-           .field(stringify!(#f_ident), &self.#f_ident)
-        )
-    });
+    let debug_struct_fields = fields
+        .named
+        .iter()
+        .map(|f| {
+            let f_ident = &f.ident.as_ref().expect("Named fields should have an ident");
+            let fmt_str = debug_attr(&f)?.unwrap_or_else(|| "{:?}".to_string());
+            Ok(quote_spanned!(f.span() =>
+               .field(stringify!(#f_ident), &format_args!(#fmt_str, self.#f_ident))
+            ))
+        })
+        .collect::<Result<Vec<_>, syn::Error>>()?;
 
     let output = quote! {
         impl ::std::fmt::Debug for #struct_ident {
@@ -40,4 +45,35 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     };
 
     Ok(output)
+}
+
+fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
+    for attr in &field.attrs {
+        if !attr.path().is_ident("debug") {
+            continue;
+        }
+
+        match &attr.meta {
+            syn::Meta::NameValue(meta) => match &meta.value {
+                syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
+                    syn::Lit::Str(s) => return Ok(Some(s.value())),
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            &expr_lit.lit,
+                            "expected string literal",
+                        ));
+                    }
+                },
+                other => return Err(syn::Error::new_spanned(other, "expected string literal")),
+            },
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    r#"expected #[debug = "..."]"#,
+                ));
+            }
+        }
+    }
+
+    Ok(None)
 }
