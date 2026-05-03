@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{DeriveInput, Field, spanned::Spanned};
+use syn::{DeriveInput, Field, GenericParam, Generics, parse_quote, spanned::Spanned};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -34,8 +34,11 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         })
         .collect::<Result<Vec<_>, syn::Error>>()?;
 
+    let generics = add_trait_bounds(input.generics);
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
     let output = quote! {
-        impl ::std::fmt::Debug for #struct_ident {
+        impl #impl_generics ::std::fmt::Debug for #struct_ident #ty_generics #where_clause {
             fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 fmt.debug_struct(stringify!(#struct_ident))
                    #(#debug_struct_fields)*
@@ -47,6 +50,7 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     Ok(output)
 }
 
+// Find attribute `#[debug = "..."]`
 fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
     for attr in &field.attrs {
         if !attr.path().is_ident("debug") {
@@ -76,4 +80,14 @@ fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
     }
 
     Ok(None)
+}
+
+// Add a bound `T: Debug` to every type parameter T.
+fn add_trait_bounds(mut generics: Generics) -> Generics {
+    for param in &mut generics.params {
+        if let GenericParam::Type(ref mut type_param) = *param {
+            type_param.bounds.push(parse_quote!(::std::fmt::Debug));
+        }
+    }
+    generics
 }
