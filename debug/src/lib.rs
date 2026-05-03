@@ -1,6 +1,11 @@
+use std::collections::HashSet;
+
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{DeriveInput, Field, GenericParam, Generics, parse_quote, spanned::Spanned};
+use syn::{
+    DeriveInput, Field, FieldsNamed, GenericArgument, GenericParam, Generics, PathArguments, Type,
+    parse_quote, spanned::Spanned,
+};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -27,14 +32,14 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         .iter()
         .map(|f| {
             let f_ident = &f.ident.as_ref().expect("Named fields should have an ident");
-            let fmt_str = debug_attr(&f)?.unwrap_or_else(|| "{:?}".to_string());
+            let fmt_str = debug_attr(f)?.unwrap_or_else(|| "{:?}".to_string());
             Ok(quote_spanned!(f.span() =>
                .field(stringify!(#f_ident), &format_args!(#fmt_str, self.#f_ident))
             ))
         })
         .collect::<Result<Vec<_>, syn::Error>>()?;
 
-    let generics = add_trait_bounds(input.generics);
+    let generics = add_trait_bounds(input.generics, &fields);
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let output = quote! {
@@ -83,11 +88,57 @@ fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
 }
 
 // Add a bound `T: Debug` to every type parameter T.
-fn add_trait_bounds(mut generics: Generics) -> Generics {
+fn add_trait_bounds(mut generics: Generics, fields: &FieldsNamed) -> Generics {
+    let phantom_idents = fields
+        .named
+        .iter()
+        .filter_map(|f| get_phantom_type_ident(&f.ty))
+        .collect::<HashSet<_>>();
+
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param {
+            // impl<T: ?Sized> Debug for PhantomData<T> {...}
+            if phantom_idents.contains(&type_param.ident) {
+                continue;
+            }
             type_param.bounds.push(parse_quote!(::std::fmt::Debug));
         }
     }
     generics
+}
+
+/// Retrieves the type parameter `T` of a phantom type `Phantom<T>`.
+fn get_phantom_type_ident<'a>(ty: &'a Type) -> Option<&'a syn::Ident> {
+    if let syn::Type::Path(type_path) = inner_type(ty, Some("PhantomData"))? {
+        let type_ident = &type_path.path.segments.first()?.ident;
+        return Some(type_ident);
+    }
+
+    None
+}
+
+/// Returns the type parameter of a type constructor e.g. `PhantomData<T> -> T`.
+fn inner_type<'a>(ty: &'a Type, wrapping_ty_ident: Option<&str>) -> Option<&'a syn::Type> {
+    if let Type::Path(syn::TypePath { qself: None, path }) = ty {
+        if path.segments.len() != 1 {
+            return None;
+        }
+
+        if let Some(ty_ident) = wrapping_ty_ident {
+            if path.segments[0].ident != ty_ident {
+                return None;
+            }
+        }
+
+        if let PathArguments::AngleBracketed(ref inner_type) = path.segments[0].arguments {
+            if inner_type.args.len() != 1 {
+                return None;
+            }
+
+            if let GenericArgument::Type(ref ty) = inner_type.args[0] {
+                return Some(ty);
+            }
+        }
+    }
+    None
 }
