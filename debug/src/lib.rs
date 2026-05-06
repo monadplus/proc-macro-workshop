@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    DeriveInput, Field, FieldsNamed, GenericArgument, GenericParam, Generics, PathArguments, Type,
-    parse_quote, spanned::Spanned,
+    DeriveInput, Field, FieldsNamed, GenericArgument, GenericParam, Generics, Ident, PathArguments,
+    Type, parse_quote, spanned::Spanned,
 };
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
@@ -56,7 +56,7 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
 }
 
 // Find attribute `#[debug = "..."]`
-fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
+fn debug_attr(field: &Field) -> Result<Option<String>, syn::Error> {
     for attr in &field.attrs {
         if !attr.path().is_ident("debug") {
             continue;
@@ -88,6 +88,7 @@ fn debug_attr<'a>(field: &Field) -> Result<Option<String>, syn::Error> {
 }
 
 // Add a bound `T: Debug` to every type parameter T.
+// Add bound `T::Value: Debug` to the where clauses for every associated type.
 fn add_trait_bounds(mut generics: Generics, fields: &FieldsNamed) -> Generics {
     let phantom_idents = fields
         .named
@@ -95,20 +96,41 @@ fn add_trait_bounds(mut generics: Generics, fields: &FieldsNamed) -> Generics {
         .filter_map(|f| get_phantom_type_ident(&f.ty))
         .collect::<HashSet<_>>();
 
+    let associated_types = get_associated_types(fields, &generics);
+    let associated_type_param_idents = associated_types
+        .iter()
+        .map(|(ident, _)| ident.clone())
+        .collect::<HashSet<_>>();
+
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param {
-            // impl<T: ?Sized> Debug for PhantomData<T> {...}
-            if phantom_idents.contains(&type_param.ident) {
+            // This is not 100% correct, we should check the type param
+            // is not used on any field.
+            if phantom_idents.contains(&type_param.ident)
+                || associated_type_param_idents.contains(&type_param.ident)
+            {
                 continue;
             }
+
             type_param.bounds.push(parse_quote!(::std::fmt::Debug));
         }
     }
+
+    // impl<T: Trait> Debug for Field<T>
+    // where
+    //     T::Value: Debug,
+    let where_clause = generics.make_where_clause();
+    for (_, ty) in associated_types {
+        where_clause
+            .predicates
+            .push_value(parse_quote!(#ty: ::std::fmt::Debug));
+    }
+
     generics
 }
 
 /// Retrieves the type parameter `T` of a phantom type `Phantom<T>`.
-fn get_phantom_type_ident<'a>(ty: &'a Type) -> Option<&'a syn::Ident> {
+fn get_phantom_type_ident(ty: &Type) -> Option<&syn::Ident> {
     if let syn::Type::Path(type_path) = inner_type(ty, Some("PhantomData"))? {
         let type_ident = &type_path.path.segments.first()?.ident;
         return Some(type_ident);
@@ -124,10 +146,10 @@ fn inner_type<'a>(ty: &'a Type, wrapping_ty_ident: Option<&str>) -> Option<&'a s
             return None;
         }
 
-        if let Some(ty_ident) = wrapping_ty_ident {
-            if path.segments[0].ident != ty_ident {
-                return None;
-            }
+        if let Some(ty_ident) = wrapping_ty_ident
+            && path.segments[0].ident != ty_ident
+        {
+            return None;
         }
 
         if let PathArguments::AngleBracketed(ref inner_type) = path.segments[0].arguments {
@@ -140,5 +162,51 @@ fn inner_type<'a>(ty: &'a Type, wrapping_ty_ident: Option<&str>) -> Option<&'a s
             }
         }
     }
+
+    None
+}
+
+// Returns all associated types present in the struct fields.
+// E.g. `values: <T::Value>,`
+fn get_associated_types(fields: &FieldsNamed, generics: &Generics) -> Vec<(Ident, Type)> {
+    let type_param_idents = generics
+        .type_params()
+        .map(|ty| ty.ident.clone())
+        .collect::<Vec<_>>();
+
+    fields
+        .named
+        .iter()
+        .filter_map(|field| {
+            associated_type(&field.ty, &type_param_idents).map(|(x, y)| (x.clone(), y.clone()))
+        })
+        .collect()
+}
+
+// associated_type(Vec<Vec<T::Value>>, &[T]) -> Some(T::Value)
+fn associated_type<'a, 'b>(
+    ty: &'a Type,
+    type_params: &'b [Ident],
+) -> Option<(&'b Ident, &'a Type)> {
+    if let Type::Path(syn::TypePath { qself: None, path }) = ty {
+        if let Some(ty_param_ident) = type_params.iter().find(|ty| **ty == path.segments[0].ident)
+            && path.segments.len() > 1
+        {
+            return Some((ty_param_ident, ty));
+        }
+
+        for segment in &path.segments {
+            if let PathArguments::AngleBracketed(ref inner_type) = segment.arguments {
+                for arg in &inner_type.args {
+                    if let GenericArgument::Type(ty) = arg
+                        && let Some(ty) = associated_type(ty, type_params)
+                    {
+                        return Some(ty);
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
