@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    DeriveInput, Field, FieldsNamed, GenericArgument, GenericParam, Generics, Ident, PathArguments,
-    Type, parse_quote, spanned::Spanned,
+    Attribute, DeriveInput, Field, FieldsNamed, GenericArgument, GenericParam, Generics, Ident,
+    LitStr, PathArguments, Type, WherePredicate, parse_quote, spanned::Spanned,
 };
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
@@ -33,13 +33,15 @@ fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         .map(|f| {
             let f_ident = &f.ident.as_ref().expect("Named fields should have an ident");
             let fmt_str = debug_attr(f)?.unwrap_or_else(|| "{:?}".to_string());
+
             Ok(quote_spanned!(f.span() =>
                .field(stringify!(#f_ident), &format_args!(#fmt_str, self.#f_ident))
             ))
         })
         .collect::<Result<Vec<_>, syn::Error>>()?;
 
-    let generics = add_trait_bounds(input.generics, &fields);
+    let explicit_bounds = debug_bound_attr(&input.attrs)?;
+    let generics = infer_trait_bounds(input.generics, &fields, explicit_bounds);
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let output = quote! {
@@ -87,44 +89,78 @@ fn debug_attr(field: &Field) -> Result<Option<String>, syn::Error> {
     Ok(None)
 }
 
-// Add a bound `T: Debug` to every type parameter T.
-// Add bound `T::Value: Debug` to the where clauses for every associated type.
-fn add_trait_bounds(mut generics: Generics, fields: &FieldsNamed) -> Generics {
-    let phantom_idents = fields
-        .named
-        .iter()
-        .filter_map(|f| get_phantom_type_ident(&f.ty))
-        .collect::<HashSet<_>>();
+// Find attribute `#[debug(bound  = "...")]`
+fn debug_bound_attr(attrs: &[Attribute]) -> Result<Option<WherePredicate>, syn::Error> {
+    let mut bounds: Option<WherePredicate> = None;
 
-    let associated_types = get_associated_types(fields, &generics);
-    let associated_type_param_idents = associated_types
-        .iter()
-        .map(|(ident, _)| ident.clone())
-        .collect::<HashSet<_>>();
+    for attr in attrs {
+        if !attr.path().is_ident("debug") {
+            continue;
+        }
 
-    for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            // This is not 100% correct, we should check the type param
-            // is not used on any field.
-            if phantom_idents.contains(&type_param.ident)
-                || associated_type_param_idents.contains(&type_param.ident)
-            {
-                continue;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("bound") {
+                let value = meta.value()?;
+                let s: LitStr = value.parse()?;
+                bounds = Some(s.parse::<WherePredicate>()?);
+                Ok(())
+            } else {
+                Err(meta.error(r#"bound = "T: Debug""#))
+            }
+        })?;
+    }
+
+    Ok(bounds)
+}
+
+fn infer_trait_bounds(
+    mut generics: Generics,
+    fields: &FieldsNamed,
+    explicit_bounds: Option<WherePredicate>,
+) -> Generics {
+    match explicit_bounds {
+        Some(predicate) => {
+            // Use provided bounds `#[debug(bound  = "...")]`
+            generics.make_where_clause().predicates.push(predicate);
+        }
+        None => {
+            // Infer bounds:
+            // * add a bound `T: Debug` to every type parameter T.
+            // * add a bound `T::Value: Debug` to the where clauses for every associated type.
+            let phantom_idents = fields
+                .named
+                .iter()
+                .filter_map(|f| get_phantom_type_ident(&f.ty))
+                .collect::<HashSet<_>>();
+
+            let associated_types = get_associated_types(fields, &generics);
+            let associated_type_param_idents = associated_types
+                .iter()
+                .map(|(ident, _)| ident.clone())
+                .collect::<HashSet<_>>();
+
+            for param in &mut generics.params {
+                if let GenericParam::Type(ref mut type_param) = *param {
+                    // This is not 100% correct, we should check the type param
+                    // is not used on any field.
+                    if phantom_idents.contains(&type_param.ident)
+                        || associated_type_param_idents.contains(&type_param.ident)
+                    {
+                        continue;
+                    }
+
+                    type_param.bounds.push(parse_quote!(::std::fmt::Debug));
+                }
             }
 
-            type_param.bounds.push(parse_quote!(::std::fmt::Debug));
+            let where_clause = generics.make_where_clause();
+            for (_, ty) in associated_types {
+                where_clause
+                    .predicates
+                    .push_value(parse_quote!(#ty: ::std::fmt::Debug));
+            }
         }
-    }
-
-    // impl<T: Trait> Debug for Field<T>
-    // where
-    //     T::Value: Debug,
-    let where_clause = generics.make_where_clause();
-    for (_, ty) in associated_types {
-        where_clause
-            .predicates
-            .push_value(parse_quote!(#ty: ::std::fmt::Debug));
-    }
+    };
 
     generics
 }
