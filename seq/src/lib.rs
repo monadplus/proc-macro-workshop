@@ -53,15 +53,40 @@ fn derive(input: Seq) -> syn::Result<TokenStream> {
 }
 
 fn replace_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStream {
-    tokens
-        .into_iter()
-        .map(|token| match token {
-            TokenTree::Ident(token_ident) if token_ident == *ident => {
+    let mut output = TokenStream::new();
+
+    let mut iter = tokens.into_iter();
+    while let Some(token) = iter.next() {
+        let mut lookahead = iter.clone();
+        let token: TokenTree = match (token, lookahead.next(), lookahead.next()) {
+            (
+                TokenTree::Ident(prefix_ident),
+                Some(TokenTree::Punct(punct)),
+                Some(TokenTree::Ident(token_ident)),
+            ) if punct.as_char() == '~' && token_ident == *ident => {
+                iter.next();
+                iter.next();
+                let ident = match (lookahead.next(), lookahead.next()) {
+                    (Some(TokenTree::Punct(punct)), Some(TokenTree::Ident(suffix_ident)))
+                        if punct.as_char() == '~' =>
+                    {
+                        iter.next();
+                        iter.next();
+                        Ident::new(
+                            &format!("{}{}{}", prefix_ident, value, suffix_ident),
+                            prefix_ident.span(),
+                        )
+                    }
+                    _ => Ident::new(&format!("{}{}", prefix_ident, value), prefix_ident.span()),
+                };
+                TokenTree::Ident(ident)
+            }
+            (TokenTree::Ident(token_ident), _, _) if token_ident == *ident => {
                 let mut lit = Literal::usize_unsuffixed(value);
                 lit.set_span(token_ident.span());
                 TokenTree::from(lit)
             }
-            TokenTree::Group(group) => {
+            (TokenTree::Group(group), _, _) => {
                 let delimiter = group.delimiter();
                 let span = group.span();
                 let stream = replace_ident(group.stream(), ident, value);
@@ -69,7 +94,10 @@ fn replace_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStrea
                 group.set_span(span);
                 TokenTree::from(group)
             }
-            other => other,
-        })
-        .collect()
+            (other, _, _) => other,
+        };
+        output.extend([token]);
+    }
+
+    output
 }
