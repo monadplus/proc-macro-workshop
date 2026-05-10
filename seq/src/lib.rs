@@ -14,6 +14,7 @@ struct Seq {
     range_token: Token![..],
     end: LitInt,
     brace_token: token::Brace,
+    content: TokenStream,
 }
 
 impl Parse for Seq {
@@ -26,6 +27,7 @@ impl Parse for Seq {
             range_token: input.parse()?,
             end: input.parse()?,
             brace_token: braced!(content in input),
+            content: content.parse()?,
         })
     }
 }
