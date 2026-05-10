@@ -1,5 +1,4 @@
-use proc_macro2::TokenStream;
-use quote::quote;
+use proc_macro2::{Group, Literal, TokenStream, TokenTree};
 use syn::{
     Ident, LitInt, Token, braced,
     parse::{Parse, ParseStream},
@@ -41,7 +40,36 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::from(output)
 }
 
-fn derive(_input: Seq) -> syn::Result<TokenStream> {
-    let output = quote! {};
-    Ok(output)
+fn derive(input: Seq) -> syn::Result<TokenStream> {
+    let start = input.start.base10_parse::<usize>()?;
+    let end = input.end.base10_parse::<usize>()?;
+
+    Ok(
+        (start..end).fold(TokenStream::new(), |mut output, i: usize| {
+            output.extend(replace_ident(input.content.clone(), &input.ident, i));
+            output
+        }),
+    )
+}
+
+fn replace_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStream {
+    tokens
+        .into_iter()
+        .map(|token| match token {
+            TokenTree::Ident(token_ident) if token_ident == *ident => {
+                let mut lit = Literal::usize_unsuffixed(value);
+                lit.set_span(token_ident.span());
+                TokenTree::from(lit)
+            }
+            TokenTree::Group(group) => {
+                let delimiter = group.delimiter();
+                let span = group.span();
+                let stream = replace_ident(group.stream(), ident, value);
+                let mut group = Group::new(delimiter, stream);
+                group.set_span(span);
+                TokenTree::from(group)
+            }
+            other => other,
+        })
+        .collect()
 }
