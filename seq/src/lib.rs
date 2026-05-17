@@ -11,6 +11,7 @@ struct Seq {
     in_token: Token![in],
     start: LitInt,
     range_token: Token![..],
+    inclusive_token: Option<Token![=]>,
     end: LitInt,
     brace_token: token::Brace,
     content: TokenStream,
@@ -24,6 +25,7 @@ impl Parse for Seq {
             in_token: input.parse()?,
             start: input.parse()?,
             range_token: input.parse()?,
+            inclusive_token: input.parse()?,
             end: input.parse()?,
             brace_token: braced!(content in input),
             content: content.parse()?,
@@ -42,7 +44,10 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 fn derive(input: Seq) -> syn::Result<TokenStream> {
     let start = input.start.base10_parse::<usize>()?;
-    let end = input.end.base10_parse::<usize>()?;
+    let mut end = input.end.base10_parse::<usize>()?;
+    if input.inclusive_token.is_some() {
+        end += 1;
+    }
     let mut interpolated = false;
 
     // Find #(..)* pattern and only interpolate the content inside.
