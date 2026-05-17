@@ -1,4 +1,4 @@
-use proc_macro2::{Group, Literal, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Literal, TokenStream, TokenTree};
 use syn::{
     Ident, LitInt, Token, braced,
     parse::{Parse, ParseStream},
@@ -43,16 +43,73 @@ pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 fn derive(input: Seq) -> syn::Result<TokenStream> {
     let start = input.start.base10_parse::<usize>()?;
     let end = input.end.base10_parse::<usize>()?;
+    let mut interpolated = false;
 
-    Ok(
-        (start..end).fold(TokenStream::new(), |mut output, i: usize| {
-            output.extend(replace_ident(input.content.clone(), &input.ident, i));
+    // Find #(..)* pattern and only interpolate the content inside.
+    let mut interpolate = |stream: TokenStream| {
+        (start..end).fold(TokenStream::new(), |mut output, value: usize| {
+            output.extend(interpolate_ident(stream.clone(), &input.ident, value));
+            interpolated = true;
             output
-        }),
-    )
+        })
+    };
+    let mut output = interpolate_template(input.content.clone(), &mut interpolate);
+
+    if !interpolated {
+        // We didn't found any #(..)* pattern, we need to interpolate the whole content.
+        output = (start..end).fold(TokenStream::new(), |mut output, value: usize| {
+            output.extend(interpolate_ident(
+                input.content.clone(),
+                &input.ident,
+                value,
+            ));
+            output
+        });
+    }
+
+    Ok(output)
 }
 
-fn replace_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStream {
+// Interpolates the body captured by `#( ... )*`
+fn interpolate_template<F>(tokens: TokenStream, interpolate: &mut F) -> TokenStream
+where
+    F: FnMut(TokenStream) -> TokenStream,
+{
+    let mut output = TokenStream::new();
+
+    let mut iter = tokens.into_iter();
+    while let Some(token) = iter.next() {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                let mut lookahead = iter.clone();
+                match (lookahead.next(), lookahead.next()) {
+                    (Some(TokenTree::Group(group)), Some(TokenTree::Punct(punct2)))
+                        if group.delimiter() == Delimiter::Parenthesis
+                            && punct2.as_char() == '*' =>
+                    {
+                        iter.next();
+                        iter.next();
+                        output.extend(interpolate(group.stream()))
+                    }
+                    _ => output.extend([TokenTree::Punct(punct)]),
+                }
+            }
+            TokenTree::Group(group) => {
+                let delimiter = group.delimiter();
+                let span = group.span();
+                let stream = interpolate_template(group.stream(), interpolate);
+                let mut group = Group::new(delimiter, stream);
+                group.set_span(span);
+                output.extend([TokenTree::from(group)]);
+            }
+            other => output.extend([other]),
+        }
+    }
+
+    output
+}
+
+fn interpolate_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStream {
     let mut output = TokenStream::new();
 
     let mut iter = tokens.into_iter();
@@ -89,7 +146,7 @@ fn replace_ident(tokens: TokenStream, ident: &Ident, value: usize) -> TokenStrea
             (TokenTree::Group(group), _, _) => {
                 let delimiter = group.delimiter();
                 let span = group.span();
-                let stream = replace_ident(group.stream(), ident, value);
+                let stream = interpolate_ident(group.stream(), ident, value);
                 let mut group = Group::new(delimiter, stream);
                 group.set_span(span);
                 TokenTree::from(group)
