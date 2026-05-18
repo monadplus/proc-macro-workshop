@@ -39,4 +39,6 @@ pub enum Conference {
     RustRush,
 }
 
-fn main() {}
+fn main() {
+    std::hint::black_box(Conference::RustBeltRust);
+}
