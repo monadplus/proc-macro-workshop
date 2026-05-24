@@ -1,6 +1,4 @@
-use proc_macro2::{Span, TokenStream};
-use quote::ToTokens;
-use syn::Item;
+use proc_macro2::Span;
 
 #[proc_macro_attribute]
 pub fn sorted(
@@ -8,18 +6,22 @@ pub fn sorted(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let _ = args;
-    let input = syn::parse_macro_input!(input as syn::Item);
+    let mut output = input.clone();
+    let enum_item = syn::parse_macro_input!(input as syn::Item);
 
-    let output = sorted_enum(input).unwrap_or_else(syn::Error::into_compile_error);
+    if let Some(error) = sorted_enum(enum_item) {
+        let error = error.into_compile_error();
+        output.extend(proc_macro::TokenStream::from(error));
+    }
     // eprintln!("{}", output);
     // panic!("{}", output);
 
     proc_macro::TokenStream::from(output)
 }
 
-fn sorted_enum(item: Item) -> syn::Result<TokenStream> {
-    let Item::Enum(item_enum) = item else {
-        return Err(syn::Error::new(
+fn sorted_enum(item: syn::Item) -> Option<syn::Error> {
+    let syn::Item::Enum(item_enum) = item else {
+        return Some(syn::Error::new(
             Span::call_site(),
             "expected enum or match expression",
         ));
@@ -36,12 +38,12 @@ fn sorted_enum(item: Item) -> syn::Result<TokenStream> {
                 .unwrap_err();
             let before = &variants[before].ident;
 
-            return Err(syn::Error::new(
+            return Some(syn::Error::new(
                 variants[i].ident.span(),
                 format!("{} should sort before {}", current, before),
             ));
         }
     }
 
-    Ok(item_enum.into_token_stream())
+    None
 }
