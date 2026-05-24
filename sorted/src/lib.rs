@@ -25,5 +25,23 @@ fn sorted_enum(item: Item) -> syn::Result<TokenStream> {
         ));
     };
 
+    let variants = item_enum.variants.iter().collect::<Vec<_>>();
+    for i in 1..variants.len() {
+        let current = &variants[i].ident;
+        let prev = &variants[i - 1].ident;
+
+        if current < prev {
+            let before = variants[..i]
+                .binary_search_by(|variant| variant.ident.cmp(&current))
+                .unwrap_err();
+            let before = &variants[before].ident;
+
+            return Err(syn::Error::new(
+                variants[i].ident.span(),
+                format!("{} should sort before {}", current, before),
+            ));
+        }
+    }
+
     Ok(item_enum.into_token_stream())
 }
