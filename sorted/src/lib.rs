@@ -34,7 +34,7 @@ fn sorted_enum(item: syn::Item) -> Option<syn::Error> {
         .map(|v| v.ident)
         .collect::<Vec<_>>();
 
-    find_out_of_order(variants)
+    find_out_of_order(variants, |ident: &syn::Ident| ident.to_string())
 }
 
 #[proc_macro_attribute]
@@ -76,8 +76,9 @@ impl VisitMut for MatchSorted {
                 .arms
                 .iter()
                 .filter_map(|arm| match &arm.pat {
-                    syn::Pat::Struct(v) => v.path.segments.last().map(|p| p.ident.clone()),
-                    syn::Pat::TupleStruct(v) => v.path.segments.last().map(|p| p.ident.clone()),
+                    syn::Pat::Path(v) => Some(v.path.clone()),
+                    syn::Pat::Struct(v) => Some(v.path.clone()),
+                    syn::Pat::TupleStruct(v) => Some(v.path.clone()),
                     otherwise => {
                         let err = syn::Error::new_spanned(otherwise, r#"unsupported by #[sorted]"#);
                         self.errors.push(err);
@@ -86,28 +87,40 @@ impl VisitMut for MatchSorted {
                 })
                 .collect::<Vec<_>>();
 
-            if let Some(err) = find_out_of_order(variants) {
+            if let Some(err) = find_out_of_order(variants, |path: &syn::Path| {
+                path.segments
+                    .iter()
+                    .map(|segment| quote!(#segment).to_string())
+                    .collect::<Vec<_>>()
+                    .join("::")
+            }) {
                 self.errors.push(err);
             }
         }
     }
 }
 
-fn find_out_of_order<T>(vs: Vec<T>) -> Option<syn::Error>
+fn find_out_of_order<T, R, F>(vs: Vec<T>, f: F) -> Option<syn::Error>
 where
-    T: Ord + syn::spanned::Spanned + std::fmt::Display,
+    T: quote::ToTokens,
+    R: Ord + std::fmt::Display,
+    F: Fn(&T) -> R,
 {
     for i in 1..vs.len() {
         let current = &vs[i];
+        let fcurrent = f(current);
         let prev = &vs[i - 1];
 
-        if current < prev {
-            let before = vs[..i].binary_search_by(|v| v.cmp(&current)).unwrap_err();
+        if fcurrent < f(prev) {
+            let before = vs[..i]
+                .binary_search_by(|v| f(v).cmp(&fcurrent))
+                .unwrap_err();
             let before = &vs[before];
+            let fbefore = f(before);
 
-            return Some(syn::Error::new(
-                current.span(),
-                format!("{} should sort before {}", current, before),
+            return Some(syn::Error::new_spanned(
+                current,
+                format!("{} should sort before {}", fcurrent, fbefore),
             ));
         }
     }
