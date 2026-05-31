@@ -1,6 +1,6 @@
 use proc_macro2::Span;
 use quote::quote;
-use syn::visit_mut::VisitMut;
+use syn::{spanned::Spanned, visit_mut::VisitMut};
 
 #[proc_macro_attribute]
 pub fn sorted(
@@ -72,6 +72,17 @@ impl VisitMut for MatchSorted {
             // Strip to avoid a compilation error
             node.attrs.remove(idx);
 
+            if let Some(idx) = node
+                .arms
+                .iter()
+                .position(|arm| matches!(arm.pat, syn::Pat::Wild(_)))
+                && idx != node.arms.len() - 1
+            {
+                let wildcard = node.arms[idx].pat.clone();
+                let err = syn::Error::new(wildcard.span(), "wildard must be placed last");
+                self.errors.push(err);
+            }
+
             let variants = node
                 .arms
                 .iter()
@@ -80,6 +91,7 @@ impl VisitMut for MatchSorted {
                     syn::Pat::Path(v) => Some(v.path.clone()),
                     syn::Pat::Struct(v) => Some(v.path.clone()),
                     syn::Pat::TupleStruct(v) => Some(v.path.clone()),
+                    syn::Pat::Wild(_) => None,
                     otherwise => {
                         let err = syn::Error::new_spanned(otherwise, r#"unsupported by #[sorted]"#);
                         self.errors.push(err);
