@@ -76,6 +76,7 @@ impl VisitMut for MatchSorted {
                 .arms
                 .iter()
                 .filter_map(|arm| match &arm.pat {
+                    syn::Pat::Ident(v) => Some(v.ident.clone().into()),
                     syn::Pat::Path(v) => Some(v.path.clone()),
                     syn::Pat::Struct(v) => Some(v.path.clone()),
                     syn::Pat::TupleStruct(v) => Some(v.path.clone()),
